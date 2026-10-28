@@ -1,0 +1,25 @@
+# Node.js and Next.js
+node_modules/
+.next/
+out/
+coverage/
+.npm-cache/
+.go-cache/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Go build output
+bin/
+*.exe
+*.test
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
