@@ -1,6 +1,6 @@
 # Computer Network chat project
 
-This repository has a Go HTTP API in `apps/api` and a Next.js frontend in `apps/web`. The backend uses PostgreSQL 18. The current implementation is at T4 in [plan.md](plan.md): database setup, HTTP account sessions, and persistent room/message services are implemented. WebSocket routing and the chat frontend are later tasks.
+This repository has a Go HTTP API in `apps/api` and a Next.js frontend in `apps/web`. The backend uses PostgreSQL 18. The current implementation is at T5 in [plan.md](plan.md): database setup, HTTP account sessions, persistent chat services, and WebSocket routing are implemented. The chat frontend is T6.
 
 ## Requirements
 
@@ -44,18 +44,21 @@ go run ./cmd/api
 
 Startup pings PostgreSQL and applies embedded migrations under a transaction-scoped advisory lock. It exits with an error if PostgreSQL is unavailable or migration fails. `GET http://127.0.0.1:8080/health` returns `{"status":"ok"}` while the database is reachable and HTTP 503 with `{"status":"unavailable"}` when it is not.
 
-The API exposes `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, and `POST /auth/logout`. Send JSON credentials to signup/login and an exact `Origin` from `ALLOWED_ORIGINS` on browser mutation requests. Auth responses set a host-only HttpOnly `chat_session` cookie; browser fetches must use `credentials: "include"`. Use the same hostname for the frontend and API URLs, even if their ports differ. Session tokens are never returned in JSON. Logout revokes the current browser session; real-time socket removal is added in T5.
+The API exposes `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, and `POST /auth/logout`. Send JSON credentials to signup/login and an exact `Origin` from `ALLOWED_ORIGINS` on browser mutation requests. Auth responses set a host-only HttpOnly `chat_session` cookie; browser fetches must use `credentials: "include"`. Use the same hostname for the frontend and API URLs, even if their ports differ. Session tokens are never returned in JSON. Logout revokes the current browser session and closes its WebSocket connections; another session for the same account stays connected.
 
-Room creation, self-join, message storage, and authorized history are implemented in `apps/api/internal/chat` and `apps/api/internal/store`. They are services for the WebSocket layer planned in T5; T4 does not add room HTTP routes or sockets.
+Authenticated clients connect to `GET /ws` using the session cookie and an exact allowed `Origin`. Commands and events use JSON text frames. The contract, payloads, pagination, recovery, and limits are in [backend.md](backend.md#7-websocket-protocol). The frontend remains a starter until T6.
 
 Run the database integration tests only with `TEST_DATABASE_URL` pointing to the separate `chat_test` database:
 
 ```sh
 cd apps/api
 go test ./...
+go vet ./...
+go build ./...
+go test -race ./...
 ```
 
-The tests create random schemas inside `chat_test` and remove them after use. They never fall back to `DATABASE_URL`. See [the store README](apps/api/internal/store/README.md) for the standalone T1 SQL schema check.
+The tests create random schemas inside `chat_test` and remove them after use. They never fall back to `DATABASE_URL`. On Windows, the race check needs a 64-bit C compiler; this machine has `C:\msys64\ucrt64\bin\gcc.exe`, which can be selected with `CC` and added to `PATH`. See [the store README](apps/api/internal/store/README.md) for the standalone T1 SQL schema check.
 
 ## Start the frontend
 

@@ -55,6 +55,20 @@ func (db *DB) SessionByDigest(parent context.Context, digest []byte) (SessionRec
 	return session, err
 }
 
+func (db *DB) SessionByID(parent context.Context, id string) (SessionRecord, error) {
+	ctx, cancel := operationContext(parent)
+	defer cancel()
+	var session SessionRecord
+	err := db.Pool.QueryRow(ctx, `SELECT s.id, s.expires_at, u.id, u.username, u.created_at
+		FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`, id).
+		Scan(&session.ID, &session.ExpiresAt, &session.User.ID, &session.User.Username, &session.User.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionRecord{}, ErrNotFound
+	}
+	return session, err
+}
+
 type NewSession struct {
 	ID             string
 	UserID         string

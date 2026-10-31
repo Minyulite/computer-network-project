@@ -16,7 +16,7 @@ import (
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
-const sessionCookieName = "chat_session"
+const sessionCookieName = auth.SessionCookieName
 const authBodyLimit = 8 * 1024
 
 type credentials struct {

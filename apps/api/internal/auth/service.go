@@ -23,6 +23,7 @@ var ErrRateLimited = errors.New("rate limited")
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,24}$`)
 
 const sessionLifetime = 7 * 24 * time.Hour
+const SessionCookieName = "chat_session"
 
 type User struct {
 	ID        string    `json:"id"`
@@ -188,6 +189,17 @@ func (s *Service) ValidateSession(ctx context.Context, token string) (Identity, 
 		return Identity{}, ErrUnauthenticated
 	}
 	record, err := s.db.SessionByDigest(ctx, digest)
+	if errors.Is(err, store.ErrNotFound) {
+		return Identity{}, ErrUnauthenticated
+	}
+	if err != nil {
+		return Identity{}, err
+	}
+	return Identity{SessionID: record.ID, User: publicUser(record.User), ExpiresAt: record.ExpiresAt}, nil
+}
+
+func (s *Service) ValidateSessionID(ctx context.Context, id string) (Identity, error) {
+	record, err := s.db.SessionByID(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return Identity{}, ErrUnauthenticated
 	}

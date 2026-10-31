@@ -10,7 +10,7 @@ import (
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
-func NewHandler(db *store.DB, authService *auth.Service, cfg config.Config) http.Handler {
+func NewHandler(db *store.DB, authService *auth.Service, cfg config.Config, wsHandler ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		status := "ok"
@@ -29,6 +29,9 @@ func NewHandler(db *store.DB, authService *auth.Service, cfg config.Config) http
 	mux.HandleFunc("POST /auth/login", loginHandler(authService, cfg))
 	mux.HandleFunc("GET /auth/me", meHandler(authService))
 	mux.HandleFunc("POST /auth/logout", logoutHandler(authService, cfg))
+	if len(wsHandler) > 0 && wsHandler[0] != nil {
+		mux.Handle("GET /ws", wsHandler[0])
+	}
 	allowed := make(map[string]bool, len(cfg.AllowedOrigins))
 	for _, origin := range cfg.AllowedOrigins {
 		allowed[origin] = true
