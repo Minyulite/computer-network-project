@@ -27,8 +27,8 @@ func TestParse(t *testing.T) {
 	if c.DatabaseMaxConns != 10 || c.ListenAddr() != "127.0.0.1:8080" || len(c.AllowedOrigins) != 2 || c.DatabaseTarget != "127.0.0.1:5432/chat" {
 		t.Fatalf("unexpected defaults: %#v", c)
 	}
-	c, err = parse(map[string]string{"DATABASE_MAX_CONNS": "2", "HOST": "0.0.0.0", "PORT": "9000"})
-	if err != nil || c.DatabaseMaxConns != 2 || c.ListenAddr() != "0.0.0.0:9000" {
+	c, err = parse(map[string]string{"DATABASE_MAX_CONNS": "2", "HOST": "0.0.0.0", "PORT": "9000", "COOKIE_SECURE": "true"})
+	if err != nil || c.DatabaseMaxConns != 2 || c.ListenAddr() != "0.0.0.0:9000" || !c.CookieSecure {
 		t.Fatalf("overrides: %#v %v", c, err)
 	}
 	for _, tc := range []map[string]string{
@@ -37,6 +37,7 @@ func TestParse(t *testing.T) {
 		{"DATABASE_MAX_CONNS": "0"}, {"DATABASE_MAX_CONNS": "101"}, {"HOST": "bad host"},
 		{"PORT": "0"}, {"PORT": "65536"}, {"ALLOWED_ORIGINS": ""},
 		{"ALLOWED_ORIGINS": "http://localhost:3000/path"}, {"ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:3000"},
+		{"COOKIE_SECURE": "maybe"},
 	} {
 		_, err := parse(tc)
 		if err == nil {

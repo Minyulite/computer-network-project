@@ -20,6 +20,7 @@ type Config struct {
 	Port             uint16
 	AllowedOrigins   []string
 	DatabaseTarget   string
+	CookieSecure     bool
 }
 
 func Load() (Config, error) { return Parse(os.Getenv) }
@@ -86,6 +87,13 @@ func Parse(getenv func(string) string) (Config, error) {
 		}
 	} else {
 		return Config{}, fmt.Errorf("ALLOWED_ORIGINS is required")
+	}
+	if raw := getenv("COOKIE_SECURE"); raw != "" {
+		secure, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("COOKIE_SECURE must be true or false")
+		}
+		c.CookieSecure = secure
 	}
 	return c, nil
 }
