@@ -1,0 +1,2 @@
+# Embedded migration checksums must be identical on Windows and Unix checkouts.
+*.sql text eol=lf

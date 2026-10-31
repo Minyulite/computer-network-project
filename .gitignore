@@ -8,6 +8,8 @@ coverage/
 .go-mod-cache
 *.tsbuildinfo
 next-env.d.ts
+playwright-report/
+test-results/
 
 # Local configuration
 .env
