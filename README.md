@@ -1,48 +1,64 @@
-# Next.js + Go starter
+# Computer Network chat project
 
-This repository contains two independent applications:
-
-```text
-apps/
-  web/  Next.js frontend (TypeScript, App Router)
-  api/  Go HTTP API
-```
+This repository has a Go HTTP API in `apps/api` and a Next.js frontend in `apps/web`. The backend uses PostgreSQL 18. The current implementation is at T2 in [plan.md](plan.md): database startup and migrations are implemented; account and chat features are later tasks.
 
 ## Requirements
 
+- Go 1.26 or newer
 - Node.js 20.9 or newer and npm
-- Go 1.22 or newer
+- PostgreSQL 18, either through Docker Compose or a native installation
 
-## Run locally
+## PostgreSQL with Docker Compose
 
-Open two terminals at the repository root.
+Copy `.env.example` to `.env` at the repository root and set separate strong values for `POSTGRES_ADMIN_PASSWORD` and `CHAT_APP_PASSWORD`. `.env` is ignored by Git. Then run:
 
-**Terminal 1 — API**
+```sh
+docker compose up -d postgres
+docker compose ps
+```
 
-```powershell
+The first startup creates a `chat_app` login role, an application database `chat`, and a separate integration-test database `chat_test`. The application role owns both databases and is not a PostgreSQL superuser. PostgreSQL data lives in the `chat_postgres_data` named volume, mounted at `/var/lib/postgresql` for the PostgreSQL 18 image. The database port is published only on `127.0.0.1:5432`. Changing the bootstrap passwords in `.env` after first initialization does not change existing database credentials; update the role in PostgreSQL if needed. `docker compose down` keeps the volume and its data. Do not remove the volume unless you intend to delete the development database.
+
+## Native PostgreSQL 18 setup
+
+As a PostgreSQL administrator, create a non-superuser application role and two databases:
+
+```sql
+CREATE ROLE chat_app LOGIN PASSWORD 'replace_with_app_password';
+CREATE DATABASE chat OWNER chat_app;
+CREATE DATABASE chat_test OWNER chat_app;
+```
+
+Run those statements individually, outside a transaction, because `CREATE DATABASE` cannot run inside one. Configure PostgreSQL to accept the application's local connection, then set `DATABASE_URL` and `TEST_DATABASE_URL` to the matching databases. Keep PostgreSQL on loopback for local development. For a remote database, configure TLS certificate validation instead of `sslmode=disable`.
+
+## Start the API
+
+Set the variables from `apps/api/.env.example` in your shell, replacing the password. The Go program reads process environment variables and does not load an `.env` file automatically. `DATABASE_URL` and `ALLOWED_ORIGINS` are required; `DATABASE_MAX_CONNS` defaults to 10, `HOST` to `127.0.0.1`, and `PORT` to 8080. The database URL must point to `chat`, not `chat_test`.
+
+If the application password contains URL-reserved characters, percent-encode it in `DATABASE_URL` and `TEST_DATABASE_URL`. In a database client's separate password field, enter the original password without URL encoding. Changing `.env` after PostgreSQL has initialized does not change the role passwords stored in the named volume; update the roles with SQL if you rotate them.
+
+```sh
 cd apps/api
 go run ./cmd/api
 ```
 
-The API listens on `http://localhost:8080` by default. Check `http://localhost:8080/health` for `{"status":"ok"}`. Set `PORT` in the shell to use another port. `apps/api/.env.example` documents the setting; Go does not load `.env` files automatically.
+Startup pings PostgreSQL and applies embedded migrations under a transaction-scoped advisory lock. It exits with an error if PostgreSQL is unavailable or migration fails. `GET http://127.0.0.1:8080/health` returns `{"status":"ok"}` while the database is reachable and HTTP 503 with `{"status":"unavailable"}` when it is not.
 
-**Terminal 2 — frontend**
+Run the database integration tests only with `TEST_DATABASE_URL` pointing to the separate `chat_test` database:
 
-```powershell
-cd apps/web
-npm.cmd install
-npm.cmd run dev
+```sh
+cd apps/api
+go test ./...
 ```
 
-Open `http://localhost:3000`. The frontend reads `API_BASE_URL` on the server; it defaults to `http://localhost:8080`. Copy `apps/web/.env.example` to `apps/web/.env.local` if you need a different API address. On a shell that runs npm directly, use `npm` instead of `npm.cmd`.
+The tests create random schemas inside `chat_test` and remove them after use. They never fall back to `DATABASE_URL`. See [the store README](apps/api/internal/store/README.md) for the standalone T1 SQL schema check.
 
-## Project layout
+## Start the frontend
 
-- `apps/web/src/app`: Next.js routes, layouts, and page styles.
-- `apps/web/src/lib`: frontend helpers, including calls to the Go API.
-- `apps/api/cmd/api`: entry point for the API binary.
-- `apps/api/internal/httpapi`: HTTP routes and handlers.
+```sh
+cd apps/web
+npm install
+npm run dev
+```
 
-The frontend calls the Go API from the Next.js server, so the browser does not need a separate CORS configuration for this starter. Add new directories when there is code to put in them.
-
-The Go module path in `apps/api/go.mod` uses `example.com` as a placeholder because this repository does not have a remote URL yet. Before publishing the module for other Go projects to download, change it to the real repository path and update Go imports.
+Open `http://localhost:3000`. The current frontend is a starter until T6. Keep the frontend's hostname consistent with the backend URL when browser authentication is added. The Go module path uses `example.com` as a placeholder until the repository has a public module path.

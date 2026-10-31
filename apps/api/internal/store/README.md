@@ -1,6 +1,6 @@
 # Initial PostgreSQL schema
 
-`migrations/001_initial.sql` defines the T1 tables. IDs are supplied by the application. Its caller owns the transaction; the migration contains no `BEGIN` or `COMMIT` and intentionally fails if an existing definition conflicts. T2 will add migration version tracking and Go database setup.
+`migrations/001_initial.sql` defines the T1 tables. IDs are supplied by the application. Its caller owns the transaction; the migration contains no `BEGIN` or `COMMIT` and intentionally fails if an existing definition conflicts. The Go runner in `migrations.go` embeds the files, records versions and checksums in `schema_migrations`, and applies pending migrations with their version records in one transaction under a transaction-scoped advisory lock.
 
 ```mermaid
 erDiagram
@@ -65,7 +65,7 @@ Use an isolated PostgreSQL 18 database and run from the `apps/api/internal/store
 psql -X -v ON_ERROR_STOP=1 -d "$TEST_DATABASE_URL" -f tests/schema.sql
 ```
 
-The script creates a test schema inside one transaction, applies the migration through a relative `psql` include, tests fixtures and constraint failures, prints the server version and result, then rolls back the schema and all fixtures. It does not touch the application's tables. A failed check exits nonzero. To apply the migration manually to a fresh database, use `psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$DATABASE_URL" -f migrations/001_initial.sql`. The application migration runner in T2 will own this step.
+The script creates a test schema inside one transaction, applies the migration through a relative `psql` include, tests fixtures and constraint failures, prints the server version and result, then rolls back the schema and all fixtures. It does not touch the application's tables. A failed check exits nonzero. For normal startup, use the API's embedded migration runner. `go test ./internal/store` uses `TEST_DATABASE_URL` and creates random isolated schemas in its dedicated test database.
 
 ## Rules owned by services
 

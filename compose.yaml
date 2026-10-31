@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      CHAT_APP_PASSWORD: ${CHAT_APP_PASSWORD:?set CHAT_APP_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - chat_postgres_data:/var/lib/postgresql
+      - ./infra/postgres/init-chat.sh:/docker-entrypoint-initdb.d/10-init-chat.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  chat_postgres_data:
