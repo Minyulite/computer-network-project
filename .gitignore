@@ -5,6 +5,7 @@ out/
 coverage/
 .npm-cache/
 .go-cache/
+.go-mod-cache
 *.tsbuildinfo
 next-env.d.ts
 
