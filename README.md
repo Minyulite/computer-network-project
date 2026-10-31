@@ -1,6 +1,6 @@
 # Computer Network chat project
 
-This repository has a Go HTTP API in `apps/api` and a Next.js frontend in `apps/web`. The backend uses PostgreSQL 18. The current implementation is at T3 in [plan.md](plan.md): database setup and HTTP account sessions are implemented; room and chat features are later tasks.
+This repository has a Go HTTP API in `apps/api` and a Next.js frontend in `apps/web`. The backend uses PostgreSQL 18. The current implementation is at T4 in [plan.md](plan.md): database setup, HTTP account sessions, and persistent room/message services are implemented. WebSocket routing and the chat frontend are later tasks.
 
 ## Requirements
 
@@ -45,6 +45,8 @@ go run ./cmd/api
 Startup pings PostgreSQL and applies embedded migrations under a transaction-scoped advisory lock. It exits with an error if PostgreSQL is unavailable or migration fails. `GET http://127.0.0.1:8080/health` returns `{"status":"ok"}` while the database is reachable and HTTP 503 with `{"status":"unavailable"}` when it is not.
 
 The API exposes `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, and `POST /auth/logout`. Send JSON credentials to signup/login and an exact `Origin` from `ALLOWED_ORIGINS` on browser mutation requests. Auth responses set a host-only HttpOnly `chat_session` cookie; browser fetches must use `credentials: "include"`. Use the same hostname for the frontend and API URLs, even if their ports differ. Session tokens are never returned in JSON. Logout revokes the current browser session; real-time socket removal is added in T5.
+
+Room creation, self-join, message storage, and authorized history are implemented in `apps/api/internal/chat` and `apps/api/internal/store`. They are services for the WebSocket layer planned in T5; T4 does not add room HTTP routes or sockets.
 
 Run the database integration tests only with `TEST_DATABASE_URL` pointing to the separate `chat_test` database:
 
