@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Next.js + Go Starter",
-  description: "A simple Next.js frontend and Go backend project.",
+  title: "Commonroom — your conversations",
+  description: "Private conversations and shared groups, across your devices.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
