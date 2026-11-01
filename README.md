@@ -33,7 +33,9 @@ Run those statements individually, outside a transaction, because `CREATE DATABA
 
 ## Start the API
 
-Set the variables from `apps/api/.env.example` in your shell, replacing the password. The Go program reads process environment variables and does not load an `.env` file automatically. `DATABASE_URL` and `ALLOWED_ORIGINS` are required; `DATABASE_MAX_CONNS` defaults to 10, `HOST` to `127.0.0.1`, and `PORT` to 8080. `COOKIE_SECURE` defaults to false for local HTTP and must be true when TLS terminates before the API. The database URL must point to `chat`, not `chat_test`.
+Copy `apps/api/.env.example` to `apps/api/.env` if you do not already have one, and replace the database password. When started from `apps/api`, Go reads that `.env` automatically. Existing process environment variables take precedence, including explicitly empty values. A missing `.env` is allowed for deployments that supply environment variables directly; an unreadable or malformed file fails startup without printing its contents. The loader reads only `.env` in the current working directory, not parent directories or `.env.example`. The repository-root `.env` remains Docker Compose configuration.
+
+`DATABASE_URL` and `ALLOWED_ORIGINS` are required; `DATABASE_MAX_CONNS` defaults to 10, `HOST` to `127.0.0.1`, and `PORT` to 8080. `COOKIE_SECURE` defaults to false for local HTTP and must be true when TLS terminates before the API. The database URL must point to `chat`, not `chat_test`. The startup loader supplies application configuration only; `go test` still requires `TEST_DATABASE_URL` in the test process environment.
 
 If the application password contains URL-reserved characters, percent-encode it in `DATABASE_URL` and `TEST_DATABASE_URL`. In a database client's separate password field, enter the original password without URL encoding. Changing `.env` after PostgreSQL has initialized does not change the role passwords stored in the named volume; update the roles with SQL if you rotate them.
 

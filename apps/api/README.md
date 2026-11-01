@@ -24,7 +24,7 @@ cd apps/api
 go run ./cmd/api
 ```
 
-The API listens on `http://localhost:8080` by default. Check `http://localhost:8080/health` for `{"status":"ok"}`. Set `PORT` in the shell to use another port. `apps/api/.env.example` documents the setting; Go does not load `.env` files automatically.
+Before starting, copy `.env.example` to `.env` inside `apps/api` if it does not exist and set the PostgreSQL connection credentials. The API automatically reads `.env` from its working directory; existing shell or deployment environment variables override file values. A missing file is allowed when the environment supplies the required configuration. Check `http://localhost:8080/health` for `{"status":"ok"}`. See the [root setup guide](../../README.md) for current database, authentication, frontend and LAN instructions.
 
 **Terminal 2 — frontend**
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -8,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 var hostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
@@ -23,7 +26,31 @@ type Config struct {
 	CookieSecure     bool
 }
 
-func Load() (Config, error) { return Parse(os.Getenv) }
+// Load reads an optional .env in the working directory. Existing process
+// variables take precedence, including explicitly empty values.
+func Load() (Config, error) { return load(".env", os.LookupEnv) }
+
+func load(path string, lookup func(string) (string, bool)) (Config, error) {
+	values := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Config{}, fmt.Errorf("read .env: %w", err)
+	}
+	if err == nil {
+		// Accept UTF-8 BOMs written by some Windows editors.
+		values, err = godotenv.Unmarshal(strings.TrimPrefix(string(data), "\ufeff"))
+		if err != nil {
+			// Parser errors can contain the original line, including credentials.
+			return Config{}, fmt.Errorf("invalid .env file: check KEY=value syntax and matching quotes")
+		}
+	}
+	return Parse(func(key string) string {
+		if value, exists := lookup(key); exists {
+			return value
+		}
+		return values[key]
+	})
+}
 
 func Parse(getenv func(string) string) (Config, error) {
 	c := Config{DatabaseMaxConns: 10, Host: "127.0.0.1", Port: 8080}
