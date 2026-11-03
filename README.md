@@ -79,6 +79,14 @@ Choose an online person to open a private room. Select a group to inspect its me
 
 Drafts and unconfirmed sends stay in memory while reconnecting. Retry uses the original message ID so a lost acknowledgment cannot create a second stored message. Refreshing or closing a tab discards unsent drafts; committed messages are recovered from PostgreSQL. If a group creation is not confirmed, refresh and check the catalogue before explicitly creating another group.
 
+## Grammar correction (AI feature)
+
+In any room's message box, select text, right-click, and choose **Correct grammar**. Review the highlighted changes, then choose **Accept** to replace only the selection, or **Cancel**. The request travels over the chat WebSocket; the Go server then calls Gemini over HTTPS. The selection and up to 500 characters on each side are sent to Google, so do not use it on anything you would not share with them.
+
+To enable it, set `GEMINI_API_KEY` in `apps/api/.env` and restart the API. Only the computer running the API needs the key and outbound HTTPS. `GEMINI_MODEL` and `GEMINI_FALLBACK_MODELS` are optional. Without a key the app runs normally and the menu reports that grammar correction is not configured; there is no mock mode. Protocol and limits are in [backend.md](backend.md#grammar-correction).
+
+Automated tests never call Gemini, so check real corrections by hand with a key before a demonstration.
+
 ## Frontend and integration validation
 
 ```sh

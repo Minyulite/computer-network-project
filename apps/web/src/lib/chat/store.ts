@@ -6,6 +6,12 @@ const emptyFeed = (): Feed => ({ messages: [], through: 0, more: false, loaded: 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const upsert = <T extends { id: string }>(items: T[], value: T) => [...items.filter(item => item.id !== value.id), value];
 
+const grammarTextLimit = 2000;
+const grammarContextLimit = 500;
+const grammarTimeoutMs = 55_000; // Longer than the API's 45-second AI budget.
+const inboundFrameLimit = 16 * 1024; // The API closes the whole socket above this size.
+const frameOverhead = 128; // Envelope fields around the payload.
+
 export function mergeMessages(previous: Message[], incoming: Message[]) {
   const byID = new Map(previous.map(message => [message.id, message]));
   for (const message of incoming) byID.set(message.id, message);
@@ -242,6 +248,18 @@ export class ChatStore {
       }
     })();
     this.historyTasks.set(roomId, task); return task;
+  };
+
+  correctGrammar = async (text: string, before: string, after: string) => {
+    if (Array.from(text).length > grammarTextLimit) throw new Error("Select at most 2,000 characters to correct.");
+    const payload = { text,
+      // Array.from counts code points, so the cut cannot split an emoji.
+      before: Array.from(before).slice(-grammarContextLimit).join(""),
+      after: Array.from(after).slice(0, grammarContextLimit).join("") };
+    if (new TextEncoder().encode(JSON.stringify(payload)).length + frameOverhead > inboundFrameLimit) throw new Error("This selection is too large to check. Select less text.");
+    const { corrected } = await this.socket.request<{ corrected: string }>("grammar.correct", payload,
+      { timeoutMs: grammarTimeoutMs, timeoutMessage: "The grammar service did not respond in time." });
+    return corrected;
   };
 
   send = async (roomId: string, text: string, retryID?: string) => {

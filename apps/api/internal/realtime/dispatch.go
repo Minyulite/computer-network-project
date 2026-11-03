@@ -7,6 +7,7 @@ import (
 
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
+	"example.com/computer-network/project/apps/api/internal/grammar"
 )
 
 type pageRequest struct {
@@ -62,7 +63,8 @@ func (h *Hub) handleCommand(cmd command) {
 		h.rates[identity.User.ID] = rates
 	}
 	now := time.Now()
-	if !rates.all.allow(now, 20, 40) || (cmd.envelope.Type == "message.send" && !rates.sends.allow(now, 5, 10)) {
+	if !rates.all.allow(now, 20, 40) || (cmd.envelope.Type == "message.send" && !rates.sends.allow(now, 5, 10)) ||
+		(cmd.envelope.Type == "grammar.correct" && !rates.grammar.allow(now, 0.5, 5)) {
 		h.fail(c, cmd.envelope.RequestID, auth.ErrRateLimited)
 		return
 	}
@@ -153,6 +155,14 @@ func (h *Hub) handleCommand(cmd command) {
 				response = fitHistory(page, p.AfterSeq != nil, cmd.envelope.RequestID)
 			}
 		}
+	case "grammar.correct":
+		var p grammarRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			err = h.startGrammar(c, cmd.envelope.RequestID, identity.User.ID, p)
+			if err == nil {
+				return // finishGrammar answers when the AI call completes.
+			}
+		}
 	default:
 		h.enqueue(c, wire("request.error", cmd.envelope.RequestID, protocolError{"unknown_type", "Unknown command"}))
 		return
@@ -187,6 +197,16 @@ func (h *Hub) fail(c *client, id string, err error) {
 		code, message = "sequence_exhausted", "Room sequence exhausted"
 	case errors.Is(err, auth.ErrRateLimited):
 		code, message = "rate_limited", "Too many requests"
+	case errors.Is(err, grammar.ErrInvalidInput):
+		code, message = "grammar_invalid", "Select 1–2,000 characters to correct"
+	case errors.Is(err, grammar.ErrNotConfigured):
+		code, message = "grammar_unavailable", "Grammar correction is not configured on this server"
+	case errors.Is(err, grammar.ErrIncomplete):
+		code, message = "grammar_incomplete", "The correction was incomplete. Select less text and try again"
+	case errors.Is(err, grammar.ErrUnavailable):
+		code, message = "ai_unavailable", "The AI service is unavailable. Try again"
+	case errors.Is(err, errGrammarBusy):
+		code, message = "grammar_busy", "Other corrections are still running. Please wait"
 	}
 	h.enqueue(c, wire("request.error", id, protocolError{code, message}))
 }

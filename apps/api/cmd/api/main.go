@@ -12,6 +12,7 @@ import (
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
 	"example.com/computer-network/project/apps/api/internal/config"
+	"example.com/computer-network/project/apps/api/internal/grammar"
 	"example.com/computer-network/project/apps/api/internal/httpapi"
 	"example.com/computer-network/project/apps/api/internal/realtime"
 	"example.com/computer-network/project/apps/api/internal/store"
@@ -36,7 +37,13 @@ func main() {
 	if err != nil {
 		log.Fatal("authentication initialization failed")
 	}
-	hub := realtime.New(authService, chat.New(db), cfg.AllowedOrigins)
+	grammarService := grammar.New(grammar.Config{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, Fallbacks: cfg.GeminiFallbackModels})
+	if grammarService.Configured() {
+		log.Printf("grammar correction enabled; model %s, fallbacks %v", cfg.GeminiModel, cfg.GeminiFallbackModels)
+	} else {
+		log.Print("GEMINI_API_KEY is not set; grammar correction is disabled")
+	}
+	hub := realtime.New(authService, chat.New(db), grammarService, cfg.AllowedOrigins)
 	authService.SetRevocationNotifier(hub)
 	server := &http.Server{Addr: cfg.ListenAddr(), Handler: httpapi.NewHandler(db, authService, cfg, hub), ReadHeaderTimeout: 5 * time.Second}
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -14,6 +14,7 @@ import (
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
 	"example.com/computer-network/project/apps/api/internal/config"
+	"example.com/computer-network/project/apps/api/internal/grammar"
 	"example.com/computer-network/project/apps/api/internal/httpapi"
 	"example.com/computer-network/project/apps/api/internal/store"
 	"github.com/coder/websocket"
@@ -34,7 +35,13 @@ type testAccount struct {
 	sessionID string
 }
 
+// newRig has no Gemini API key, so tests cannot send text to Google.
 func newRig(t *testing.T) *testRig {
+	t.Helper()
+	return newRigWithGrammar(t, grammar.New(grammar.Config{}))
+}
+
+func newRigWithGrammar(t *testing.T, corrector GrammarCorrector) *testRig {
 	t.Helper()
 	raw := os.Getenv("TEST_DATABASE_URL")
 	if raw == "" {
@@ -83,7 +90,7 @@ func newRig(t *testing.T) *testRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(a, chat.New(db), []string{testOrigin})
+	h := New(a, chat.New(db), corrector, []string{testOrigin})
 	a.SetRevocationNotifier(h)
 	server := httptest.NewServer(httpapi.NewHandler(db, a, config.Config{AllowedOrigins: []string{testOrigin}}, h))
 	t.Cleanup(func() {
@@ -206,6 +213,46 @@ func field(t *testing.T, f testFrame, key string) json.RawMessage {
 		t.Fatal(err)
 	}
 	return p[key]
+}
+
+func TestGrammarCommandOverRealSocket(t *testing.T) {
+	r := newRig(t)
+	c := r.socket(t, r.signup(t, "alice"))
+	send(t, c, "grammar-1", "grammar.correct", grammarRequest{Text: "i has went"})
+	if got := string(field(t, until(t, c, "request.error", "grammar-1"), "code")); got != `"grammar_unavailable"` {
+		t.Fatalf("code %s", got)
+	}
+	send(t, c, "grammar-2", "grammar.correct", grammarRequest{Text: "   "})
+	if got := string(field(t, until(t, c, "request.error", "grammar-2"), "code")); got != `"grammar_invalid"` {
+		t.Fatalf("code %s", got)
+	}
+	send(t, c, "grammar-3", "grammar.correct", map[string]string{"text": "x", "extra": "y"})
+	if got := string(field(t, until(t, c, "request.error", "grammar-3"), "code")); got != `"invalid_payload"` {
+		t.Fatalf("code %s", got)
+	}
+	// The connection is still usable after every rejection.
+	send(t, c, "after", "users.list", map[string]any{})
+	until(t, c, "request.ok", "after")
+}
+
+func TestGrammarSlowCorrectionDoesNotDelayOtherUsers(t *testing.T) {
+	ai := newBlockingCorrector()
+	r := newRigWithGrammar(t, ai)
+	alice := r.socket(t, r.signup(t, "alice"))
+	bob := r.socket(t, r.signup(t, "bob"))
+
+	send(t, alice, "slow", "grammar.correct", grammarRequest{Text: "i has went"})
+	awaitEntered(t, ai) // The AI call is in progress and will not finish on its own.
+
+	send(t, bob, "bob-list", "users.list", map[string]any{})
+	until(t, bob, "request.ok", "bob-list")
+	send(t, alice, "alice-list", "users.list", map[string]any{})
+	until(t, alice, "request.ok", "alice-list")
+
+	close(ai.release)
+	if got := string(field(t, until(t, alice, "request.ok", "slow"), "corrected")); got != `"fixed: i has went"` {
+		t.Fatalf("corrected %s", got)
+	}
 }
 
 func TestHandshakeAndExpiry(t *testing.T) {

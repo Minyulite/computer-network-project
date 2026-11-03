@@ -20,6 +20,7 @@ var errCapacity = errors.New("connection limit reached")
 type Hub struct {
 	auth           *auth.Service
 	chat           *chat.Service
+	grammar        GrammarCorrector
 	allowedOrigins map[string]bool
 	instanceID     string
 	control        chan any
@@ -32,6 +33,9 @@ type Hub struct {
 	byUser      map[string]map[string]*client
 	bySession   map[string]map[string]*client
 	rates       map[string]*userRates
+	// Kept apart from rates, which are dropped when a user's last connection
+	// closes while that user's corrections may still be finishing.
+	grammarInflight map[string]int
 }
 
 type register struct {
@@ -49,15 +53,15 @@ type command struct {
 	envelope envelope
 }
 
-func New(authService *auth.Service, chatService *chat.Service, origins []string) *Hub {
+func New(authService *auth.Service, chatService *chat.Service, grammarService GrammarCorrector, origins []string) *Hub {
 	allowed := make(map[string]bool, len(origins))
 	for _, origin := range origins {
 		allowed[origin] = true
 	}
-	h := &Hub{auth: authService, chat: chatService, allowedOrigins: allowed, instanceID: uuid(),
+	h := &Hub{auth: authService, chat: chatService, grammar: grammarService, allowedOrigins: allowed, instanceID: uuid(),
 		control: make(chan any, 256), commands: make(chan command, 256), finished: make(chan struct{}),
 		connections: map[string]*client{}, byUser: map[string]map[string]*client{},
-		bySession: map[string]map[string]*client{}, rates: map[string]*userRates{}}
+		bySession: map[string]map[string]*client{}, rates: map[string]*userRates{}, grammarInflight: map[string]int{}}
 	go h.run()
 	return h
 }
@@ -187,6 +191,8 @@ func (h *Hub) handleControl(value any) bool {
 			h.removeClient(c, websocket.StatusPolicyViolation, "Session revoked")
 		}
 		close(v.reply)
+	case grammarDone:
+		h.finishGrammar(v)
 	case shutdown:
 		for _, c := range h.connections {
 			h.removeClient(c, websocket.StatusGoingAway, "Server shutdown")
@@ -299,6 +305,7 @@ func (b *bucket) allow(now time.Time, rate, burst float64) bool {
 }
 
 type userRates struct {
-	all   bucket
-	sends bucket
+	all     bucket
+	sends   bucket
+	grammar bucket
 }

@@ -22,13 +22,13 @@ Persistence and session support are implementation choices supporting the reques
 
 ### Defer
 
-- AI features and cloud deployment.
+- Cloud deployment and AI features other than grammar correction ([section 7](#grammar-correction)).
 - Attachments, voice/video calls, reactions, typing indicators, read receipts, and push notifications.
 - Email verification, password recovery, social login, and account profile editing.
 - Group invitations, adding other users, administrators, removing members, leaving/deleting groups, and message editing/deletion.
 - Multiple Go server instances, Redis, and distributed message routing.
 
-The PDF specifies that the later special-feature work must include at least one AI feature. That remains a later phase.
+The PDF requires at least one AI feature among the special features. Grammar correction is that feature.
 
 ## 2. Requirements and acceptance criteria
 
@@ -455,6 +455,40 @@ For session expiry, use the recorded deadline and command-time validation. Reche
 
 On shutdown: stop accepting new requests/upgrades, stop accepting new chat commands, finish or fail pending bounded operations, explicitly close all WebSockets, wait for connection goroutines, then close the database. HTTP shutdown alone does not manage upgraded WebSocket connections.
 
+## Grammar correction
+
+This is the AI special feature. The browser uses its existing chat WebSocket; only the Go server talks to Gemini, over HTTPS, and only it holds the API key.
+
+```text
+Browser --WebSocket (TCP)--> Go API --HTTPS (TLS/TCP)--> Gemini generateContent
+```
+
+`grammar.correct` is a normal authenticated command:
+
+```json
+{
+  "v": 1,
+  "type": "grammar.correct",
+  "requestId": "req-3",
+  "payload": { "text": "has went", "before": "I ", "after": " to school." }
+}
+```
+
+`text` is the selection. `before` and `after` are read-only context; the server keeps at most 500 code points of each. The `request.ok` payload is `{ "corrected": "went" }`: the exact replacement for `text`, including its outer whitespace, delivered only to the requesting connection. Nothing is stored or broadcast.
+
+| `request.error` code | Meaning |
+| --- | --- |
+| `grammar_invalid` | `text` is blank or above 2,000 code points. |
+| `grammar_unavailable` | The server has no `GEMINI_API_KEY`. |
+| `grammar_incomplete` | The model stopped early, so no partial replacement is offered. |
+| `ai_unavailable` | Gemini failed after retries. |
+| `grammar_busy` | The user already has 3 corrections running. |
+| `rate_limited` | The user exceeded the grammar rate. |
+
+The coordinator handles every user's commands in order, so it must not wait for the AI. It starts a worker goroutine that uses the client's context and returns the result through the control channel; the worker never touches coordinator state. Disconnecting or revoking the session cancels the call. Each call makes up to 3 attempts in 45 seconds, moving to the fallback models on retries and stopping early when Gemini rejects the request.
+
+The selected text and its context are sent to Google, and the UI says so. Do not log them.
+
 ## 11. Validation and operational limits
 
 These are the initial enforced values, to be exercised in tests rather than treated as performance claims:
@@ -473,6 +507,8 @@ These are the initial enforced values, to be exercised in tests rather than trea
 | Total WebSocket commands | 20 per second per user, burst 40 |
 | Login attempts | Bounded by both source IP and canonical username; initially 10 per minute per bucket |
 | Signup attempts | 5 per minute per source IP |
+| Grammar corrections | 1 per 2 seconds per user, burst 5, and 3 running at once, shared across devices |
+| Grammar text | 1-2,000 Unicode code points selected, plus 500 of context on each side |
 | Connections | 10 per user and 200 per server |
 | Concurrent password-hash operations | 4 |
 

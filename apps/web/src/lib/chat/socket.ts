@@ -38,14 +38,14 @@ export class ChatSocket {
   }
   reconnect() { this.stop(); this.attempts = 0; this.start(); }
 
-  request<T>(type: string, payload: object = {}): Promise<T> {
+  request<T>(type: string, payload: object = {}, options: { timeoutMs?: number; timeoutMessage?: string } = {}): Promise<T> {
     if (!this.ready || this.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Connection unavailable. Reconnect to try again."));
     const requestId = newID();
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error("No confirmation received. The request may have reached the server."));
-      }, 10000);
+        reject(new Error(options.timeoutMessage ?? "No confirmation received. The request may have reached the server."));
+      }, options.timeoutMs ?? 10000);
       this.pending.set(requestId, { resolve: data => resolve(data as T), reject, timer });
       try { this.socket!.send(JSON.stringify({ v: 1, type, requestId, payload })); }
       catch { clearTimeout(timer); this.pending.delete(requestId); reject(new Error("Connection lost before confirmation.")); }

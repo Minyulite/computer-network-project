@@ -1,2 +1,4 @@
 # Embedded migration checksums must be identical on Windows and Unix checkouts.
 *.sql text eol=lf
+# Shell scripts run inside Linux containers and fail with CRLF line endings.
+*.sh text eol=lf
