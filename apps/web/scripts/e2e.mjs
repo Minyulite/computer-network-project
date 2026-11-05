@@ -23,6 +23,7 @@ const env = { ...process.env, DATABASE_URL: scoped.href, HOST: "127.0.0.1", PORT
   ALLOWED_ORIGINS: "http://127.0.0.1:13000", COOKIE_SECURE: "false",
   NEXT_PUBLIC_API_URL: "http://127.0.0.1:18080", NEXT_PUBLIC_WS_URL: "ws://127.0.0.1:18080/ws",
   E2E_DATABASE_URL: scoped.href, E2E_CONTROL_KEY: controlKey,
+  GEMINI_API_KEY: "", // Tests must never spend a developer's quota or send text to Google.
 };
 const binary = path.join(root, "bin", process.platform === "win32" ? "t7-api.exe" : "t7-api");
 let api, frontend, control;

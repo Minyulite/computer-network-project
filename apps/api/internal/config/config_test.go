@@ -27,6 +27,13 @@ func TestParse(t *testing.T) {
 	if c.DatabaseMaxConns != 10 || c.ListenAddr() != "127.0.0.1:8080" || len(c.AllowedOrigins) != 2 || c.DatabaseTarget != "127.0.0.1:5432/chat" {
 		t.Fatalf("unexpected defaults: %#v", c)
 	}
+	if c.GeminiAPIKey != "" || c.GeminiModel != defaultGeminiModel || len(c.GeminiFallbackModels) != 2 {
+		t.Fatalf("unexpected Gemini defaults: %#v", c)
+	}
+	c, err = parse(map[string]string{"GEMINI_API_KEY": " key ", "GEMINI_MODEL": "model-1.5", "GEMINI_FALLBACK_MODELS": "one, two.0"})
+	if err != nil || c.GeminiAPIKey != "key" || c.GeminiModel != "model-1.5" || len(c.GeminiFallbackModels) != 2 || c.GeminiFallbackModels[1] != "two.0" {
+		t.Fatalf("Gemini overrides: %#v %v", c, err)
+	}
 	c, err = parse(map[string]string{"DATABASE_MAX_CONNS": "2", "HOST": "0.0.0.0", "PORT": "9000", "COOKIE_SECURE": "true"})
 	if err != nil || c.DatabaseMaxConns != 2 || c.ListenAddr() != "0.0.0.0:9000" || !c.CookieSecure {
 		t.Fatalf("overrides: %#v %v", c, err)
@@ -37,7 +44,8 @@ func TestParse(t *testing.T) {
 		{"DATABASE_MAX_CONNS": "0"}, {"DATABASE_MAX_CONNS": "101"}, {"HOST": "bad host"},
 		{"PORT": "0"}, {"PORT": "65536"}, {"ALLOWED_ORIGINS": ""},
 		{"ALLOWED_ORIGINS": "http://localhost:3000/path"}, {"ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:3000"},
-		{"COOKIE_SECURE": "maybe"},
+		{"COOKIE_SECURE": "maybe"}, {"GEMINI_MODEL": "../secret"}, {"GEMINI_FALLBACK_MODELS": "one,,two"},
+		{"GEMINI_FALLBACK_MODELS": "bad/model"},
 	} {
 		_, err := parse(tc)
 		if err == nil {

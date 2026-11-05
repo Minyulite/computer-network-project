@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { GrammarTextarea } from "@/components/grammar-textarea";
 import { ApiError, authRequest, errorText, type Session, type User } from "@/lib/api";
 import { ChatStore } from "@/lib/chat/store";
 import type { ChatState, Room } from "@/lib/chat/types";
@@ -168,9 +169,11 @@ function ChatWorkspace({ user }: { user: User }) {
             </div>
             <form className="composer" onSubmit={send}>
               <label className="sr-only" htmlFor="message">Message</label>
-              <textarea id="message" placeholder={`Message ${selectedTitle}`} value={draft} rows={2}
-                onChange={e => setDrafts(value => ({ ...value, [room.id]: e.target.value }))}
-                onKeyDown={e => { if (e.ctrlKey && e.key === "Shift") { e.preventDefault(); convertDraft(e.currentTarget); return; } if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }} />
+              {/* Keyed so a correction started in one room can never land in another room's draft. */}
+              <GrammarTextarea key={room.id} id="message" placeholder={`Message ${selectedTitle}`} value={draft} rows={2}
+                onChange={text => setDrafts(value => ({ ...value, [room.id]: text }))}
+                onConvert={convertDraft}
+                correct={store.correctGrammar} canCorrect={connected} />
               <div className="composer-footer"><span className={Array.from(draft.trim()).length > 2000 ? "error" : "muted"}>{Array.from(draft.trim()).length}/2,000 <span className="keyboard-hint">· Enter to send, Shift + Enter for a new line</span></span>
                 <div className="composer-actions"><button type="button" title="Convert selected text or the whole draft (Ctrl+Shift)" disabled={!draft} onClick={e => convertDraft(e.currentTarget.form?.querySelector("textarea") ?? null)}>Convert language <kbd>Ctrl</kbd>+<kbd>Shift</kbd></button><button className="primary" disabled={!connected || !draft.trim() || Array.from(draft.trim()).length > 2000}>Send message <span aria-hidden>↗</span></button></div></div>
             </form>

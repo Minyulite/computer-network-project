@@ -237,6 +237,72 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
 
+// Runs with GEMINI_API_KEY empty, so no text leaves the machine. This covers the
+// whole path up to the AI call; real corrections are checked by hand (see README).
+test("grammar menu uses the chat socket and never sends the draft", async ({ browser }) => {
+  const dianaContext = await browser.newContext(), ericContext = await browser.newContext();
+  const diana = await dianaContext.newPage(), eric = await ericContext.newPage();
+  const sockets: string[] = [];
+  diana.on("websocket", ws => sockets.push(ws.url()));
+  const sent: string[] = [];
+  diana.on("websocket", ws => ws.on("framesent", frame => sent.push(String(frame.payload))));
+  try {
+    await signup(diana, "diana"); await signup(eric, "eric");
+    await direct(diana, "eric");
+    const box = diana.getByRole("textbox", { name: "Message", exact: true });
+    const draft = "i has went to school";
+    await box.fill(draft);
+
+    // Without a selection the browser's own menu stays in charge.
+    await box.dispatchEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 500, clientY: 500 });
+    await expect(diana.getByRole("dialog", { name: "Grammar correction" })).toHaveCount(0);
+
+    await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(2, 9));
+    await box.dispatchEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 500, clientY: 500 });
+    await diana.getByRole("button", { name: "Correct grammar" }).click();
+    await expect(diana.getByRole("alert").filter({ hasText: "not configured" })).toBeVisible();
+
+    // The composer is a form: the menu's buttons must not submit it.
+    await diana.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(diana.getByRole("dialog", { name: "Grammar correction" })).toHaveCount(0);
+    await expect(box).toHaveValue(draft);
+    await expect(diana.locator("[data-message-id], .message.pending")).toHaveCount(0);
+    expect(sent.filter(frame => frame.includes('"message.send"'))).toHaveLength(0);
+
+    // One socket, the protocol envelope, and only 500 characters of context each side.
+    expect(sockets).toHaveLength(1);
+    const request = JSON.parse(sent.find(frame => frame.includes('"grammar.correct"'))!);
+    expect(request).toMatchObject({ v: 1, type: "grammar.correct", payload: { text: "has wen", before: "i ", after: "t to school" } });
+    await box.fill(`${"x".repeat(600)} teh ${"y".repeat(600)}`);
+    await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(601, 604));
+    await box.dispatchEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 500, clientY: 500 });
+    await diana.getByRole("button", { name: "Correct grammar" }).click();
+    await expect(diana.getByRole("alert").filter({ hasText: "not configured" })).toBeVisible();
+    const trimmed = JSON.parse(sent.filter(frame => frame.includes('"grammar.correct"')).at(-1)!);
+    expect(trimmed.payload).toMatchObject({ text: "teh" });
+    expect(trimmed.payload.before).toHaveLength(500);
+    expect(trimmed.payload.after).toHaveLength(500);
+    await diana.keyboard.press("Escape");
+
+    // A draft far above the server's frame limit must not drop the socket.
+    await box.fill(`${"ก".repeat(9000)} teh`);
+    await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(9001, 9004));
+    await box.dispatchEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 500, clientY: 500 });
+    await diana.getByRole("button", { name: "Correct grammar" }).click();
+    await expect(diana.getByRole("alert").filter({ hasText: "not configured" })).toBeVisible();
+    await diana.keyboard.press("Escape");
+    await connected(diana);
+
+    // Normal chat still works on the same connection afterwards.
+    await send(diana, "Plain hello after grammar");
+    await direct(eric, "diana");
+    await expect(eric.getByRole("log")).toContainText("Plain hello after grammar");
+    expect(sockets).toHaveLength(1);
+  } finally {
+    await dianaContext.close(); await ericContext.close();
+  }
+});
+
 test("authentication errors and keyboard forms", async ({ page, request }) => {
   await page.goto("/signup");
   await page.getByLabel("Username", { exact: true }).fill("bad name");

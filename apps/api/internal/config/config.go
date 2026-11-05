@@ -16,14 +16,25 @@ import (
 var hostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 var databasePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
+// Model names are placed in the request URL path.
+var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+const (
+	defaultGeminiModel     = "gemini-3.8-flash"
+	defaultGeminiFallbacks = "gemini-3.6-flash,gemini-3.5-flash"
+)
+
 type Config struct {
-	DatabaseURL      string
-	DatabaseMaxConns int32
-	Host             string
-	Port             uint16
-	AllowedOrigins   []string
-	DatabaseTarget   string
-	CookieSecure     bool
+	DatabaseURL          string
+	DatabaseMaxConns     int32
+	Host                 string
+	Port                 uint16
+	AllowedOrigins       []string
+	DatabaseTarget       string
+	CookieSecure         bool
+	GeminiAPIKey         string // Optional; grammar correction is disabled without it.
+	GeminiModel          string
+	GeminiFallbackModels []string
 }
 
 // Load reads an optional .env in the working directory. Existing process
@@ -121,6 +132,25 @@ func Parse(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("COOKIE_SECURE must be true or false")
 		}
 		c.CookieSecure = secure
+	}
+	c.GeminiAPIKey = strings.TrimSpace(getenv("GEMINI_API_KEY"))
+	c.GeminiModel = strings.TrimSpace(getenv("GEMINI_MODEL"))
+	if c.GeminiModel == "" {
+		c.GeminiModel = defaultGeminiModel
+	}
+	if !modelPattern.MatchString(c.GeminiModel) {
+		return Config{}, fmt.Errorf("invalid GEMINI_MODEL")
+	}
+	fallbacks := getenv("GEMINI_FALLBACK_MODELS")
+	if strings.TrimSpace(fallbacks) == "" {
+		fallbacks = defaultGeminiFallbacks
+	}
+	for _, model := range strings.Split(fallbacks, ",") {
+		model = strings.TrimSpace(model)
+		if !modelPattern.MatchString(model) {
+			return Config{}, fmt.Errorf("invalid GEMINI_FALLBACK_MODELS")
+		}
+		c.GeminiFallbackModels = append(c.GeminiFallbackModels, model)
 	}
 	return c, nil
 }

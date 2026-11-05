@@ -1,6 +1,6 @@
 # Implementation handoff
 
-Use this file to implement one bounded task at a time. The full design is in [backend.md](backend.md); the assignment requirements are in [the PDF](Computer_Network_Term_Project___Socket_Programming.pdf). PostgreSQL is required. Complete the backend before the frontend. Implement R1-R11 plus the requested account/multiple-device support; defer special features.
+Use this file to implement one bounded task at a time. The full design is in [backend.md](backend.md); the assignment requirements are in [the PDF](Computer_Network_Term_Project___Socket_Programming.pdf). PostgreSQL is required. Complete the backend before the frontend. Implement R1-R11 plus the requested account/multiple-device support; grammar correction is the AI special feature (see [backend.md](backend.md#grammar-correction)), and other special features are deferred.
 
 ## Working rules for each task
 
