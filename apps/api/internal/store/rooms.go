@@ -20,6 +20,8 @@ type RoomRecord struct {
 	DirectUserHigh string
 	LastSeq        int64
 	CreatedAt      time.Time
+	BotID          string
+	BotName        string
 }
 
 type OwnRoomRecord struct {
@@ -34,16 +36,18 @@ type MemberRecord struct {
 	JoinedSeq int64
 }
 
-const roomColumns = `r.id, r.kind, r.name, r.created_by, r.direct_user_low, r.direct_user_high, r.last_seq, r.created_at`
+const roomColumns = `r.id, r.kind, r.name, r.created_by, r.direct_user_low, r.direct_user_high, r.last_seq, r.created_at,
+	r.bot_id, (SELECT b.name FROM bots b WHERE b.id = r.bot_id)`
 
 func scanRoom(row pgx.Row) (RoomRecord, error) {
 	var room RoomRecord
-	var name, low, high sql.NullString
-	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt)
+	var name, low, high, botID, botName sql.NullString
+	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt, &botID, &botName)
 	if err != nil {
 		return RoomRecord{}, err
 	}
 	room.Name, room.DirectUserLow, room.DirectUserHigh = name.String, low.String, high.String
+	room.BotID, room.BotName = botID.String, botName.String
 	return room, nil
 }
 
@@ -51,7 +55,7 @@ func (db *DB) UserExists(parent context.Context, userID string) (bool, error) {
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var exists bool
-	err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists)
+	err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND NOT is_bot)`, userID).Scan(&exists)
 	return exists, err
 }
 
@@ -185,12 +189,13 @@ func (db *DB) Membership(parent context.Context, roomID, userID string) (RoomRec
 
 func scanRoomWithMembership(row pgx.Row, joinedSeq *int64) (RoomRecord, error) {
 	var room RoomRecord
-	var name, low, high sql.NullString
-	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt, joinedSeq)
+	var name, low, high, botID, botName sql.NullString
+	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt, &botID, &botName, joinedSeq)
 	if err != nil {
 		return RoomRecord{}, err
 	}
 	room.Name, room.DirectUserLow, room.DirectUserHigh = name.String, low.String, high.String
+	room.BotID, room.BotName = botID.String, botName.String
 	return room, nil
 }
 
@@ -292,7 +297,8 @@ func (db *DB) EligibleMemberIDs(parent context.Context, roomID string, seq int64
 	rows, err := db.Pool.Query(ctx, `SELECT m.user_id FROM room_members m JOIN rooms r ON r.id = m.room_id
 		WHERE m.room_id = $1 AND
 		((r.kind = 'direct' AND m.user_id IN (r.direct_user_low, r.direct_user_high))
-		 OR (r.kind = 'group' AND m.joined_seq < $2))
+		 OR (r.kind = 'group' AND m.joined_seq < $2)
+		 OR r.kind = 'bot')
 		ORDER BY m.user_id`, roomID, seq)
 	if err != nil {
 		return nil, err

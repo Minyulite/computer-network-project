@@ -41,6 +41,22 @@ type sendRequest struct {
 	Text            string `json:"text"`
 }
 
+type botIDRequest struct {
+	BotID string `json:"botId"`
+}
+type botCreateRequest struct {
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Templates   []chat.BotTemplateInput `json:"templates"`
+}
+type botUpdateRequest struct {
+	BotID       string                  `json:"botId"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Enabled     bool                    `json:"enabled"`
+	Templates   []chat.BotTemplateInput `json:"templates"`
+}
+
 func (h *Hub) handleCommand(cmd command) {
 	c := cmd.client
 	if h.connections[c.id] == nil {
@@ -142,6 +158,62 @@ func (h *Hub) handleCommand(cmd command) {
 				h.ok(c, cmd.envelope.RequestID, map[string]any{"messageId": result.Message.ID, "roomId": result.Message.RoomID, "seq": result.Message.Seq, "clientMessageId": result.Message.ClientMessageID})
 				if result.Created {
 					h.broadcastUsers(result.RecipientUserIDs, "message.created", result.Message)
+					if result.RoomKind == "bot" {
+						h.startBot(identity.User.ID, result.Message.RoomID, result.Message.ID, result.Message.Text)
+					}
+				}
+				return
+			}
+		}
+	case "bots.list":
+		var p pageRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			response, err = h.chat.BotCatalog(ctx, identity, chat.PageOptions{Limit: p.Limit, Cursor: p.Cursor})
+		}
+	case "bots.mine":
+		var p struct{}
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			var bots []chat.Bot
+			bots, err = h.chat.MyBots(ctx, identity)
+			response = map[string]any{"bots": bots}
+		}
+	case "bot.get":
+		var p botIDRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			response, err = h.chat.GetBot(ctx, identity, p.BotID)
+		}
+	case "bot.create":
+		var p botCreateRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			var detail chat.BotDetail
+			detail, err = h.chat.CreateBot(ctx, identity, chat.BotInput{Name: p.Name, Description: p.Description, Enabled: true, Templates: p.Templates})
+			if err == nil {
+				h.ok(c, cmd.envelope.RequestID, detail)
+				h.broadcastAll("bot.upserted", map[string]any{"bot": detail.Bot})
+				return
+			}
+		}
+	case "bot.update":
+		var p botUpdateRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			var detail chat.BotDetail
+			detail, err = h.chat.UpdateBot(ctx, identity, p.BotID, chat.BotInput{Name: p.Name, Description: p.Description, Enabled: p.Enabled, Templates: p.Templates})
+			if err == nil {
+				h.ok(c, cmd.envelope.RequestID, detail)
+				h.broadcastAll("bot.upserted", map[string]any{"bot": detail.Bot})
+				return
+			}
+		}
+	case "bot.open":
+		var p botIDRequest
+		if err = payloadInto(cmd.envelope.Payload, &p); err == nil {
+			var room chat.Room
+			var created bool
+			room, created, err = h.chat.OpenBot(ctx, identity, p.BotID)
+			if err == nil {
+				h.ok(c, cmd.envelope.RequestID, map[string]any{"room": room, "created": created})
+				if created {
+					h.broadcastUsers([]string{identity.User.ID}, "room.upserted", map[string]any{"room": room})
 				}
 				return
 			}
@@ -191,6 +263,10 @@ func (h *Hub) fail(c *client, id string, err error) {
 		code, message = "idempotency_conflict", "Message ID conflicts with earlier send"
 	case errors.Is(err, chat.ErrUserUnavailable):
 		code, message = "user_unavailable", "User unavailable"
+	case errors.Is(err, chat.ErrBotUnavailable):
+		code, message = "bot_unavailable", "Bot unavailable"
+	case errors.Is(err, chat.ErrBotLimit):
+		code, message = "bot_limit", "You have reached the limit of bots"
 	case errors.Is(err, chat.ErrSelfChat):
 		code, message = "self_chat", "Cannot open a direct room with yourself"
 	case errors.Is(err, chat.ErrSequenceExhausted):

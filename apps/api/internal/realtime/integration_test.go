@@ -43,6 +43,11 @@ func newRig(t *testing.T) *testRig {
 
 func newRigWithGrammar(t *testing.T, corrector GrammarCorrector) *testRig {
 	t.Helper()
+	return newRigFull(t, corrector, nil)
+}
+
+func newRigFull(t *testing.T, corrector GrammarCorrector, makeBots func(*chat.Service) BotReplier) *testRig {
+	t.Helper()
 	raw := os.Getenv("TEST_DATABASE_URL")
 	if raw == "" {
 		t.Skip("TEST_DATABASE_URL required for WebSocket integration tests")
@@ -90,7 +95,12 @@ func newRigWithGrammar(t *testing.T, corrector GrammarCorrector) *testRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(a, chat.New(db), corrector, []string{testOrigin})
+	chatService := chat.New(db)
+	var bots BotReplier
+	if makeBots != nil {
+		bots = makeBots(chatService)
+	}
+	h := New(a, chatService, corrector, bots, []string{testOrigin})
 	a.SetRevocationNotifier(h)
 	server := httptest.NewServer(httpapi.NewHandler(db, a, config.Config{AllowedOrigins: []string{testOrigin}}, h))
 	t.Cleanup(func() {

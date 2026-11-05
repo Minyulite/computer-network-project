@@ -13,6 +13,8 @@ var ErrRoomUnavailable = errors.New("room unavailable")
 var ErrNotGroup = errors.New("not a group")
 var ErrIdempotencyConflict = errors.New("client message ID conflicts with an earlier send")
 var ErrSequenceExhausted = errors.New("room sequence exhausted")
+var ErrBotUnavailable = errors.New("bot unavailable")
+var ErrBotLimit = errors.New("bot limit reached")
 
 const MaxSequence int64 = 9007199254740991
 
@@ -31,6 +33,8 @@ type Room struct {
 	LatestSeq       int64     `json:"latestSeq"`
 	HistoryStartSeq int64     `json:"historyStartSeq"`
 	CreatedAt       time.Time `json:"createdAt"`
+	BotID           string    `json:"botId,omitempty"`
+	BotName         string    `json:"botName,omitempty"`
 }
 
 type Group struct {
@@ -56,6 +60,7 @@ type Message struct {
 }
 
 type SendResult struct {
+	RoomKind         string
 	Message          Message
 	Created          bool
 	RecipientUserIDs []string

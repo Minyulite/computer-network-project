@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/botai"
 	"example.com/computer-network/project/apps/api/internal/chat"
 	"example.com/computer-network/project/apps/api/internal/config"
 	"example.com/computer-network/project/apps/api/internal/grammar"
 	"example.com/computer-network/project/apps/api/internal/httpapi"
+	"example.com/computer-network/project/apps/api/internal/llm"
 	"example.com/computer-network/project/apps/api/internal/realtime"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
@@ -43,7 +45,9 @@ func main() {
 	} else {
 		log.Print("GEMINI_API_KEY is not set; grammar correction is disabled")
 	}
-	hub := realtime.New(authService, chat.New(db), grammarService, cfg.AllowedOrigins)
+	chatService := chat.New(db)
+	botService := botai.New(llm.New(llm.Config{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, Fallbacks: cfg.GeminiFallbackModels}), chatService)
+	hub := realtime.New(authService, chatService, grammarService, botService, cfg.AllowedOrigins)
 	authService.SetRevocationNotifier(hub)
 	server := &http.Server{Addr: cfg.ListenAddr(), Handler: httpapi.NewHandler(db, authService, cfg, hub), ReadHeaderTimeout: 5 * time.Second}
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

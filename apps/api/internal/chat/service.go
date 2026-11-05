@@ -53,7 +53,8 @@ func roomValue(record store.RoomRecord, joinedSeq int64) Room {
 	}
 	return Room{ID: record.ID, Kind: record.Kind, Name: record.Name, CreatedBy: record.CreatedBy,
 		DirectUserLow: record.DirectUserLow, DirectUserHigh: record.DirectUserHigh,
-		LatestSeq: record.LastSeq, HistoryStartSeq: start, CreatedAt: record.CreatedAt}
+		LatestSeq: record.LastSeq, HistoryStartSeq: start, CreatedAt: record.CreatedAt,
+		BotID: record.BotID, BotName: record.BotName}
 }
 
 func groupValue(record store.RoomRecord) Group {
@@ -199,7 +200,7 @@ func (s *Service) SendMessage(ctx context.Context, caller auth.Identity,
 	if record.RoomID != roomID || record.Text != text {
 		return SendResult{}, ErrIdempotencyConflict
 	}
-	result := SendResult{Message: messageValue(record, caller.User.Username), Created: created}
+	result := SendResult{RoomKind: room.Kind, Message: messageValue(record, caller.User.Username), Created: created}
 	if created {
 		result.RecipientUserIDs, err = s.db.EligibleMemberIDs(ctx, roomID, record.Seq)
 		if err != nil {
