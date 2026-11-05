@@ -7,6 +7,7 @@ import { GrammarTextarea } from "@/components/grammar-textarea";
 import { ApiError, authRequest, errorText, type Session, type User } from "@/lib/api";
 import { ChatStore } from "@/lib/chat/store";
 import type { ChatState, Room } from "@/lib/chat/types";
+import { convertKeyboardLanguage } from "@/lib/chat/keyboard-language";
 
 export function ChatApp() {
   const router = useRouter();
@@ -82,6 +83,18 @@ function ChatWorkspace({ user }: { user: User }) {
     void store.send(room.id, text);
   }
 
+  function convertDraft(textarea: HTMLTextAreaElement | null) {
+    if (!textarea || !room) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const from = start === end ? 0 : start;
+    const to = start === end ? textarea.value.length : end;
+    if (from === to) return;
+    const converted = convertKeyboardLanguage(textarea.value.slice(from, to));
+    const next = textarea.value.slice(0, from) + converted + textarea.value.slice(to);
+    setDrafts(value => ({ ...value, [room.id]: next }));
+    requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(from, from + converted.length); });
+  }
   if (state.status === "expired") return <main className="loading-shell"><p className="brand">↗ Commonroom</p><h1>Sign in again</h1>
     <p>Your session ended or the account in this browser changed.</p><Link className="button primary" href="/signin">Continue to sign in</Link></main>;
 
@@ -159,9 +172,10 @@ function ChatWorkspace({ user }: { user: User }) {
               {/* Keyed so a correction started in one room can never land in another room's draft. */}
               <GrammarTextarea key={room.id} id="message" placeholder={`Message ${selectedTitle}`} value={draft} rows={2}
                 onChange={text => setDrafts(value => ({ ...value, [room.id]: text }))}
+                onConvert={convertDraft}
                 correct={store.correctGrammar} canCorrect={connected} />
               <div className="composer-footer"><span className={Array.from(draft.trim()).length > 2000 ? "error" : "muted"}>{Array.from(draft.trim()).length}/2,000 <span className="keyboard-hint">· Enter to send, Shift + Enter for a new line</span></span>
-                <button className="primary" disabled={!connected || !draft.trim() || Array.from(draft.trim()).length > 2000}>Send message <span aria-hidden>↗</span></button></div>
+                <div className="composer-actions"><button type="button" title="Convert selected text or the whole draft (Ctrl+Shift)" disabled={!draft} onClick={e => convertDraft(e.currentTarget.form?.querySelector("textarea") ?? null)}>Convert language <kbd>Ctrl</kbd>+<kbd>Shift</kbd></button><button className="primary" disabled={!connected || !draft.trim() || Array.from(draft.trim()).length > 2000}>Send message <span aria-hidden>↗</span></button></div></div>
             </form>
           </>}
         </>}

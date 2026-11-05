@@ -18,13 +18,14 @@ type Props = {
   onChange: (value: string) => void;
   correct: (text: string, before: string, after: string) => Promise<string>;
   canCorrect: boolean;
+  onConvert?: (textarea: HTMLTextAreaElement) => void;
   placeholder?: string;
   rows?: number;
 };
 
 // Message box with a custom right-click menu: select text, choose "Correct
 // grammar", review the diff, and Accept to replace only the selection.
-export function GrammarTextarea({ id, value, onChange, correct, canCorrect, placeholder, rows }: Props) {
+export function GrammarTextarea({ id, value, onChange, correct, canCorrect, onConvert, placeholder, rows }: Props) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -129,6 +130,11 @@ export function GrammarTextarea({ id, value, onChange, correct, canCorrect, plac
       onChange={event => onChange(event.target.value)}
       onContextMenu={openMenu}
       onKeyDown={event => {
+        if (onConvert && event.ctrlKey && event.key === "Shift") {
+          event.preventDefault();
+          onConvert(event.currentTarget);
+          return;
+        }
         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault();
           event.currentTarget.form?.requestSubmit();
