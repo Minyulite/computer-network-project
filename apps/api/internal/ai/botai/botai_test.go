@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"example.com/computer-network/project/apps/api/internal/ai/llm"
 	"example.com/computer-network/project/apps/api/internal/chat"
-	"example.com/computer-network/project/apps/api/internal/llm"
 )
 
 type fakeLLM struct {

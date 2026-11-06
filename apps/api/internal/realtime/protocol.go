@@ -14,7 +14,6 @@ const responseLimit = 256 * 1024
 const outboundQueue = 64
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-var cursorPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var errEnvelope = errors.New("invalid envelope")
 
 type envelope struct {

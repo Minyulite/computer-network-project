@@ -2,53 +2,27 @@ package chat
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"regexp"
-	"strings"
-	"unicode/utf8"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
-var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+const (
+	maxGroupName       = 64
+	maxMessageRunes    = 2000
+	defaultHistorySize = 50
+	maxHistorySize     = 100
+)
 
 type Service struct{ db *store.DB }
 
 func New(db *store.DB) *Service { return &Service{db: db} }
 
-func callerID(identity auth.Identity) (string, error) {
-	id := strings.ToLower(identity.User.ID)
-	if identity.SessionID == "" || !uuidPattern.MatchString(id) {
-		return "", ErrUnauthenticated
-	}
-	return id, nil
-}
-
-func canonicalUUID(value string) (string, error) {
-	value = strings.ToLower(value)
-	if !uuidPattern.MatchString(value) {
-		return "", ErrInvalidInput
-	}
-	return value, nil
-}
-
-func newUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	raw := hex.EncodeToString(b[:])
-	return raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:], nil
-}
-
 func roomValue(record store.RoomRecord, joinedSeq int64) Room {
 	start := int64(1)
-	if record.Kind == "group" {
+	if record.Kind == RoomGroup {
 		start = joinedSeq + 1
 	}
 	return Room{ID: record.ID, Kind: record.Kind, Name: record.Name, CreatedBy: record.CreatedBy,
@@ -61,12 +35,68 @@ func groupValue(record store.RoomRecord) Group {
 	return Group{ID: record.ID, Name: record.Name, CreatedBy: record.CreatedBy, CreatedAt: record.CreatedAt}
 }
 
+func memberValue(record store.MemberRecord) GroupMember {
+	return GroupMember{User: UserSummary{ID: record.UserID, Username: record.Username}, JoinedAt: record.JoinedAt}
+}
+
+func messageValue(record store.MessageRecord, username string) Message {
+	return Message{ID: record.ID, RoomID: record.RoomID,
+		Sender:          UserSummary{ID: record.SenderID, Username: username},
+		ClientMessageID: record.ClientMessageID, Seq: record.Seq, Text: record.Text, SentAt: record.CreatedAt}
+}
+
+// canSee reports whether userID may read a room it has a membership row in.
+// Direct rooms additionally require the user to be one of the two parties.
+func canSee(room store.RoomRecord, userID string) bool {
+	return room.Kind != RoomDirect || userID == room.DirectUserLow || userID == room.DirectUserHigh
+}
+
+// authorizeRoom returns the room when userID is a member allowed to use it.
+func (s *Service) authorizeRoom(ctx context.Context, roomID, userID string) (store.RoomRecord, error) {
+	room, _, err := s.db.Membership(ctx, roomID, userID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !canSee(room, userID)) {
+		return store.RoomRecord{}, ErrRoomUnavailable
+	}
+	return room, err
+}
+
+// storeMessage saves record under a fresh message ID. When the client message
+// ID was used before, the earlier message is returned with created false.
+func (s *Service) storeMessage(ctx context.Context, record store.MessageRecord) (store.MessageRecord, bool, error) {
+	messageID, err := id.New()
+	if err != nil {
+		return store.MessageRecord{}, false, err
+	}
+	record.ID = messageID
+	saved, created, err := s.db.SaveMessage(ctx, record)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return store.MessageRecord{}, false, ErrRoomUnavailable
+	case errors.Is(err, store.ErrSequenceExhausted):
+		return store.MessageRecord{}, false, ErrSequenceExhausted
+	}
+	return saved, created, err
+}
+
+// sendResult wraps a stored message and, for a new one, who should receive it.
+func (s *Service) sendResult(ctx context.Context, kind string, record store.MessageRecord, username string, created bool) (SendResult, error) {
+	result := SendResult{RoomKind: kind, Message: messageValue(record, username), Created: created}
+	if created {
+		var err error
+		result.RecipientUserIDs, err = s.db.EligibleMemberIDs(ctx, record.RoomID, record.Seq)
+		if err != nil {
+			return SendResult{}, err
+		}
+	}
+	return result, nil
+}
+
 func (s *Service) OpenDirect(ctx context.Context, caller auth.Identity, otherUserID string) (Room, bool, error) {
 	userID, err := callerID(caller)
 	if err != nil {
 		return Room{}, false, err
 	}
-	otherUserID, err = canonicalUUID(otherUserID)
+	otherUserID, err = parseID(otherUserID)
 	if err != nil {
 		return Room{}, false, err
 	}
@@ -80,11 +110,8 @@ func (s *Service) OpenDirect(ctx context.Context, caller auth.Identity, otherUse
 	if !exists {
 		return Room{}, false, ErrUserUnavailable
 	}
-	lowID, highID := userID, otherUserID
-	if highID < lowID {
-		lowID, highID = highID, lowID
-	}
-	roomID, err := newUUID()
+	lowID, highID := min(userID, otherUserID), max(userID, otherUserID)
+	roomID, err := id.New()
 	if err != nil {
 		return Room{}, false, err
 	}
@@ -107,14 +134,11 @@ func (s *Service) CreateGroup(ctx context.Context, caller auth.Identity, name st
 	if err != nil {
 		return Room{}, err
 	}
-	if !utf8.ValidString(name) {
-		return Room{}, ErrInvalidInput
+	name, err = cleanText(name, 1, maxGroupName)
+	if err != nil {
+		return Room{}, err
 	}
-	name = strings.TrimSpace(name)
-	if count := utf8.RuneCountInString(name); count < 1 || count > 64 {
-		return Room{}, ErrInvalidInput
-	}
-	roomID, err := newUUID()
+	roomID, err := id.New()
 	if err != nil {
 		return Room{}, err
 	}
@@ -130,18 +154,17 @@ func (s *Service) JoinGroup(ctx context.Context, caller auth.Identity, roomID st
 	if err != nil {
 		return JoinResult{}, err
 	}
-	roomID, err = canonicalUUID(roomID)
+	roomID, err = parseID(roomID)
 	if err != nil {
 		return JoinResult{}, err
 	}
 	joinedSeq, created, err := s.db.JoinGroup(ctx, roomID, userID)
-	if errors.Is(err, store.ErrNotFound) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
 		return JoinResult{}, ErrRoomUnavailable
-	}
-	if errors.Is(err, store.ErrNotGroup) {
+	case errors.Is(err, store.ErrNotGroup):
 		return JoinResult{}, ErrNotGroup
-	}
-	if err != nil {
+	case err != nil:
 		return JoinResult{}, err
 	}
 	record, err := s.db.RoomByID(ctx, roomID)
@@ -157,63 +180,31 @@ func (s *Service) SendMessage(ctx context.Context, caller auth.Identity,
 	if err != nil {
 		return SendResult{}, err
 	}
-	roomID, err = canonicalUUID(roomID)
+	roomID, err = parseID(roomID)
 	if err != nil {
 		return SendResult{}, err
 	}
-	clientMessageID, err = canonicalUUID(clientMessageID)
+	clientMessageID, err = parseID(clientMessageID)
 	if err != nil {
 		return SendResult{}, err
 	}
-	if !utf8.ValidString(text) {
-		return SendResult{}, ErrInvalidInput
-	}
-	text = strings.TrimSpace(text)
-	if count := utf8.RuneCountInString(text); count < 1 || count > 2000 {
-		return SendResult{}, ErrInvalidInput
-	}
-	room, _, err := s.db.Membership(ctx, roomID, userID)
-	if errors.Is(err, store.ErrNotFound) {
-		return SendResult{}, ErrRoomUnavailable
-	}
+	text, err = cleanText(text, 1, maxMessageRunes)
 	if err != nil {
 		return SendResult{}, err
 	}
-	if room.Kind == "direct" && userID != room.DirectUserLow && userID != room.DirectUserHigh {
-		return SendResult{}, ErrRoomUnavailable
-	}
-	messageID, err := newUUID()
+	room, err := s.authorizeRoom(ctx, roomID, userID)
 	if err != nil {
 		return SendResult{}, err
 	}
-	record, created, err := s.db.SaveMessage(ctx, store.MessageRecord{
-		ID: messageID, RoomID: roomID, SenderID: userID, ClientMessageID: clientMessageID, Text: text})
-	if errors.Is(err, store.ErrNotFound) {
-		return SendResult{}, ErrRoomUnavailable
-	}
-	if errors.Is(err, store.ErrSequenceExhausted) {
-		return SendResult{}, ErrSequenceExhausted
-	}
+	record, created, err := s.storeMessage(ctx, store.MessageRecord{
+		RoomID: roomID, SenderID: userID, ClientMessageID: clientMessageID, Text: text})
 	if err != nil {
 		return SendResult{}, err
 	}
 	if record.RoomID != roomID || record.Text != text {
 		return SendResult{}, ErrIdempotencyConflict
 	}
-	result := SendResult{RoomKind: room.Kind, Message: messageValue(record, caller.User.Username), Created: created}
-	if created {
-		result.RecipientUserIDs, err = s.db.EligibleMemberIDs(ctx, roomID, record.Seq)
-		if err != nil {
-			return SendResult{}, err
-		}
-	}
-	return result, nil
-}
-
-func messageValue(record store.MessageRecord, username string) Message {
-	return Message{ID: record.ID, RoomID: record.RoomID,
-		Sender:          UserSummary{ID: record.SenderID, Username: username},
-		ClientMessageID: record.ClientMessageID, Seq: record.Seq, Text: record.Text, SentAt: record.CreatedAt}
+	return s.sendResult(ctx, room.Kind, record, caller.User.Username, created)
 }
 
 func (s *Service) History(ctx context.Context, caller auth.Identity, roomID string, options HistoryOptions) (HistoryPage, error) {
@@ -221,31 +212,16 @@ func (s *Service) History(ctx context.Context, caller auth.Identity, roomID stri
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	roomID, err = canonicalUUID(roomID)
+	roomID, err = parseID(roomID)
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	if options.BeforeSeq != nil && options.AfterSeq != nil {
-		return HistoryPage{}, ErrInvalidInput
-	}
-	if options.Limit < 0 || options.Limit > 100 ||
-		(options.BeforeSeq != nil && (*options.BeforeSeq < 1 || *options.BeforeSeq > MaxSequence)) ||
-		(options.AfterSeq != nil && (*options.AfterSeq < 0 || *options.AfterSeq > MaxSequence)) ||
-		(options.UpToSeq != nil && (*options.UpToSeq < 0 || *options.UpToSeq > MaxSequence)) {
-		return HistoryPage{}, ErrInvalidInput
-	}
-	if options.Limit == 0 {
-		options.Limit = 50
-	}
-	room, _, err := s.db.Membership(ctx, roomID, userID)
-	if errors.Is(err, store.ErrNotFound) {
-		return HistoryPage{}, ErrRoomUnavailable
-	}
+	options, err = historyOptions(options)
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	if room.Kind == "direct" && userID != room.DirectUserLow && userID != room.DirectUserHigh {
-		return HistoryPage{}, ErrRoomUnavailable
+	if _, err := s.authorizeRoom(ctx, roomID, userID); err != nil {
+		return HistoryPage{}, err
 	}
 	record, err := s.db.History(ctx, roomID, userID, options.Limit,
 		options.BeforeSeq, options.AfterSeq, options.UpToSeq)
@@ -261,31 +237,19 @@ func (s *Service) History(ctx context.Context, caller auth.Identity, roomID stri
 	for _, message := range record.Messages {
 		page.Messages = append(page.Messages, messageValue(message, message.SenderUsername))
 	}
-	if page.HasMore && len(page.Messages) > 0 {
-		if options.AfterSeq != nil {
-			value := page.Messages[len(page.Messages)-1].Seq
-			page.NextAfterSeq = &value
-		} else {
-			value := page.Messages[0].Seq
-			page.NextBeforeSeq = &value
-		}
-	}
+	page.SetContinuation(options.AfterSeq != nil)
 	return page, nil
 }
 
-func pageOptions(options PageOptions) (PageOptions, error) {
-	if options.Limit < 0 || options.Limit > 50 {
-		return PageOptions{}, ErrInvalidInput
+func historyOptions(options HistoryOptions) (HistoryOptions, error) {
+	inRange := func(v *int64, low int64) bool { return v == nil || (*v >= low && *v <= MaxSequence) }
+	if (options.BeforeSeq != nil && options.AfterSeq != nil) ||
+		options.Limit < 0 || options.Limit > maxHistorySize ||
+		!inRange(options.BeforeSeq, 1) || !inRange(options.AfterSeq, 0) || !inRange(options.UpToSeq, 0) {
+		return HistoryOptions{}, ErrInvalidInput
 	}
 	if options.Limit == 0 {
-		options.Limit = 20
-	}
-	if options.Cursor != "" {
-		var err error
-		options.Cursor, err = canonicalUUID(options.Cursor)
-		if err != nil {
-			return PageOptions{}, err
-		}
+		options.Limit = defaultHistorySize
 	}
 	return options, nil
 }
@@ -302,22 +266,14 @@ func (s *Service) Groups(ctx context.Context, caller auth.Identity, options Page
 	if err != nil {
 		return Page[Group]{}, err
 	}
-	page := Page[Group]{Items: make([]Group, 0, min(len(records), options.Limit))}
-	if len(records) > options.Limit {
-		page.NextCursor = records[options.Limit-1].ID
-		records = records[:options.Limit]
-	}
-	for _, record := range records {
-		page.Items = append(page.Items, groupValue(record))
-	}
-	return page, nil
+	return paginate(records, options.Limit, func(r store.RoomRecord) string { return r.ID }, groupValue), nil
 }
 
 func (s *Service) GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options PageOptions) (Page[GroupMember], error) {
 	if _, err := callerID(caller); err != nil {
 		return Page[GroupMember]{}, err
 	}
-	roomID, err := canonicalUUID(roomID)
+	roomID, err := parseID(roomID)
 	if err != nil {
 		return Page[GroupMember]{}, err
 	}
@@ -332,22 +288,14 @@ func (s *Service) GroupMembers(ctx context.Context, caller auth.Identity, roomID
 	if err != nil {
 		return Page[GroupMember]{}, err
 	}
-	if room.Kind != "group" {
+	if room.Kind != RoomGroup {
 		return Page[GroupMember]{}, ErrNotGroup
 	}
 	records, err := s.db.GroupMembers(ctx, roomID, options.Cursor, options.Limit+1)
 	if err != nil {
 		return Page[GroupMember]{}, err
 	}
-	page := Page[GroupMember]{Items: make([]GroupMember, 0, min(len(records), options.Limit))}
-	if len(records) > options.Limit {
-		page.NextCursor = records[options.Limit-1].UserID
-		records = records[:options.Limit]
-	}
-	for _, record := range records {
-		page.Items = append(page.Items, GroupMember{User: UserSummary{ID: record.UserID, Username: record.Username}, JoinedAt: record.JoinedAt})
-	}
-	return page, nil
+	return paginate(records, options.Limit, func(r store.MemberRecord) string { return r.UserID }, memberValue), nil
 }
 
 func (s *Service) OwnRooms(ctx context.Context, caller auth.Identity, options PageOptions) (Page[Room], error) {
@@ -363,16 +311,13 @@ func (s *Service) OwnRooms(ctx context.Context, caller auth.Identity, options Pa
 	if err != nil {
 		return Page[Room]{}, err
 	}
-	page := Page[Room]{Items: make([]Room, 0, min(len(records), options.Limit))}
-	if len(records) > options.Limit {
-		page.NextCursor = records[options.Limit-1].Room.ID
-		records = records[:options.Limit]
-	}
+	// The cursor comes from the unfiltered records so hidden rooms never stall paging.
+	records, next := trimPage(records, options.Limit, func(r store.OwnRoomRecord) string { return r.Room.ID })
+	page := Page[Room]{Items: make([]Room, 0, len(records)), NextCursor: next}
 	for _, record := range records {
-		if record.Room.Kind == "direct" && userID != record.Room.DirectUserLow && userID != record.Room.DirectUserHigh {
-			continue
+		if canSee(record.Room, userID) {
+			page.Items = append(page.Items, roomValue(record.Room, record.JoinedSeq))
 		}
-		page.Items = append(page.Items, roomValue(record.Room, record.JoinedSeq))
 	}
 	return page, nil
 }

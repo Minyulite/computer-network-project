@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"github.com/coder/websocket"
 )
 
@@ -26,7 +27,7 @@ type client struct {
 
 func newClient(h *Hub, conn *websocket.Conn, identity auth.Identity) *client {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &client{hub: h, conn: conn, id: uuid(), identity: identity,
+	return &client{hub: h, conn: conn, id: id.MustNew(), identity: identity,
 		ctx: ctx, cancel: cancel, out: make(chan []byte, outboundQueue), done: make(chan struct{}), closeDone: make(chan struct{})}
 }
 

@@ -1,67 +1,47 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
-	"strings"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/config"
-	"example.com/computer-network/project/apps/api/internal/store"
 )
 
-func NewHandler(db *store.DB, authService *auth.Service, cfg config.Config, wsHandler ...http.Handler) http.Handler {
+// Pinger reports whether the database is reachable.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// Deps are what the HTTP API routes to.
+type Deps struct {
+	DB        Pinger
+	Auth      *auth.Service
+	Config    config.Config
+	WebSocket http.Handler // Optional; mounted at GET /ws when set.
+}
+
+func NewHandler(d Deps) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		status := "ok"
-		w.Header().Set("Content-Type", "application/json")
+	mux.HandleFunc("GET /health", healthHandler(d.DB))
+	mux.HandleFunc("POST /auth/signup", signupHandler(d.Auth, d.Config))
+	mux.HandleFunc("POST /auth/login", loginHandler(d.Auth, d.Config))
+	mux.HandleFunc("GET /auth/me", meHandler(d.Auth))
+	mux.HandleFunc("POST /auth/logout", logoutHandler(d.Auth, d.Config))
+	if d.WebSocket != nil {
+		mux.Handle("GET /ws", d.WebSocket)
+	}
+	return withAuthOrigin(d.Config.AllowedOrigins, mux)
+}
+
+func healthHandler(db Pinger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status, code := "ok", http.StatusOK
 		if err := db.Ping(r.Context()); err != nil {
-			status = "unavailable"
-			w.WriteHeader(http.StatusServiceUnavailable)
+			status, code = "unavailable", http.StatusServiceUnavailable
 		}
-		if err := json.NewEncoder(w).Encode(struct {
+		writeJSON(w, code, struct {
 			Status string `json:"status"`
-		}{Status: status}); err != nil {
-			return
-		}
-	})
-	mux.HandleFunc("POST /auth/signup", signupHandler(authService, cfg))
-	mux.HandleFunc("POST /auth/login", loginHandler(authService, cfg))
-	mux.HandleFunc("GET /auth/me", meHandler(authService))
-	mux.HandleFunc("POST /auth/logout", logoutHandler(authService, cfg))
-	if len(wsHandler) > 0 && wsHandler[0] != nil {
-		mux.Handle("GET /ws", wsHandler[0])
+		}{Status: status})
 	}
-	allowed := make(map[string]bool, len(cfg.AllowedOrigins))
-	for _, origin := range cfg.AllowedOrigins {
-		allowed[origin] = true
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/auth/") {
-			mux.ServeHTTP(w, r)
-			return
-		}
-		origins := r.Header.Values("Origin")
-		origin := ""
-		if len(origins) == 1 {
-			origin = origins[0]
-		}
-		if len(origins) > 1 || (origin != "" && !allowed[origin]) ||
-			((r.Method == http.MethodPost || r.Method == http.MethodOptions) && origin == "") {
-			writeError(w, http.StatusForbidden, "origin_forbidden", "Origin is not allowed")
-			return
-		}
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Add("Vary", "Origin")
-		}
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
 }

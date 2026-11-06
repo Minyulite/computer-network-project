@@ -3,6 +3,15 @@ package chat
 import (
 	"errors"
 	"time"
+
+	"example.com/computer-network/project/apps/api/internal/store"
+)
+
+// Room kinds, as sent to clients in Room.Kind.
+const (
+	RoomDirect = store.RoomDirect
+	RoomGroup  = store.RoomGroup
+	RoomBot    = store.RoomBot
 )
 
 var ErrInvalidInput = errors.New("invalid chat input")
@@ -96,4 +105,21 @@ type HistoryPage struct {
 	HasMore         bool      `json:"hasMore"`
 	NextBeforeSeq   *int64    `json:"nextBeforeSeq,omitempty"`
 	NextAfterSeq    *int64    `json:"nextAfterSeq,omitempty"`
+}
+
+// SetContinuation points the cursor for the next request just past the
+// messages in the page: after the newest when reading forward, otherwise
+// before the oldest.
+func (p *HistoryPage) SetContinuation(forward bool) {
+	p.NextBeforeSeq, p.NextAfterSeq = nil, nil
+	if !p.HasMore || len(p.Messages) == 0 {
+		return
+	}
+	if forward {
+		value := p.Messages[len(p.Messages)-1].Seq
+		p.NextAfterSeq = &value
+	} else {
+		value := p.Messages[0].Seq
+		p.NextBeforeSeq = &value
+	}
 }

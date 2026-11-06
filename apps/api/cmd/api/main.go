@@ -3,69 +3,91 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"example.com/computer-network/project/apps/api/internal/ai/botai"
+	"example.com/computer-network/project/apps/api/internal/ai/grammar"
+	"example.com/computer-network/project/apps/api/internal/ai/llm"
 	"example.com/computer-network/project/apps/api/internal/auth"
-	"example.com/computer-network/project/apps/api/internal/botai"
 	"example.com/computer-network/project/apps/api/internal/chat"
 	"example.com/computer-network/project/apps/api/internal/config"
-	"example.com/computer-network/project/apps/api/internal/grammar"
 	"example.com/computer-network/project/apps/api/internal/httpapi"
-	"example.com/computer-network/project/apps/api/internal/llm"
 	"example.com/computer-network/project/apps/api/internal/realtime"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
+const (
+	startupTimeout  = 20 * time.Second
+	shutdownTimeout = 15 * time.Second
+)
+
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
+	if err := run(); err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
+}
+
+// run wires the services together and serves until SIGINT or SIGTERM. It
+// returns instead of exiting so deferred cleanup always runs.
+func run() error {
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("database startup failed: %v", err)
+		return err
+	}
+
+	startCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
+	db, err := store.Open(startCtx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
+	if err != nil {
+		return fmt.Errorf("database startup failed: %w", err)
 	}
 	defer db.Close()
-	if err := store.Migrate(ctx, db.Pool); err != nil {
-		log.Fatal("database migration failed; check PostgreSQL and migration files")
+	if err := store.Migrate(startCtx, db.Pool); err != nil {
+		return errors.New("database migration failed; check PostgreSQL and migration files")
 	}
+
 	authService, err := auth.New(db)
 	if err != nil {
-		log.Fatal("authentication initialization failed")
+		return errors.New("authentication initialization failed")
 	}
-	grammarService := grammar.New(grammar.Config{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, Fallbacks: cfg.GeminiFallbackModels})
-	if grammarService.Configured() {
-		log.Printf("grammar correction enabled; model %s, fallbacks %v", cfg.GeminiModel, cfg.GeminiFallbackModels)
+	ai := llm.New(llm.Config{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, Fallbacks: cfg.GeminiFallbackModels})
+	if ai.Configured() {
+		log.Printf("AI features enabled; model %s, fallbacks %v", cfg.GeminiModel, cfg.GeminiFallbackModels)
 	} else {
-		log.Print("GEMINI_API_KEY is not set; grammar correction is disabled")
+		log.Print("GEMINI_API_KEY is not set; grammar correction and bot answers are disabled")
 	}
 	chatService := chat.New(db)
-	botService := botai.New(llm.New(llm.Config{APIKey: cfg.GeminiAPIKey, Model: cfg.GeminiModel, Fallbacks: cfg.GeminiFallbackModels}), chatService)
-	hub := realtime.New(authService, chatService, grammarService, botService, cfg.AllowedOrigins)
+	hub := realtime.New(authService, chatService, grammar.New(ai), botai.New(ai, chatService), cfg.AllowedOrigins)
 	authService.SetRevocationNotifier(hub)
-	server := &http.Server{Addr: cfg.ListenAddr(), Handler: httpapi.NewHandler(db, authService, cfg, hub), ReadHeaderTimeout: 5 * time.Second}
+
+	server := &http.Server{
+		Addr:              cfg.ListenAddr(),
+		Handler:           httpapi.NewHandler(httpapi.Deps{DB: db, Auth: authService, Config: cfg, WebSocket: hub}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-signals.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-		_ = hub.Shutdown(shutdownCtx)
+		_ = server.Shutdown(ctx)
+		_ = hub.Shutdown(ctx)
 	}()
+
 	log.Printf("API listening on %s; database %s", cfg.ListenAddr(), cfg.DatabaseTarget)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+		return err
 	}
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
-	if err := hub.Shutdown(shutdownCtx); err != nil {
+	if err := hub.Shutdown(ctx); err != nil {
 		log.Printf("WebSocket shutdown: %v", err)
 	}
+	return nil
 }

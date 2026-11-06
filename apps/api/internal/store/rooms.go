@@ -11,6 +11,13 @@ import (
 
 var ErrNotGroup = errors.New("room is not a group")
 
+// Values of rooms.kind. SQL in this package spells them out literally.
+const (
+	RoomDirect = "direct"
+	RoomGroup  = "group"
+	RoomBot    = "bot"
+)
+
 type RoomRecord struct {
 	ID             string
 	Kind           string
@@ -146,7 +153,7 @@ func (db *DB) JoinGroup(parent context.Context, roomID, userID string) (int64, b
 	if err != nil {
 		return 0, false, err
 	}
-	if kind != "group" {
+	if kind != RoomGroup {
 		return 0, false, ErrNotGroup
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO room_members (room_id, user_id, joined_seq)

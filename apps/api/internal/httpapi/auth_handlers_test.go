@@ -105,7 +105,7 @@ func authTestServer(t *testing.T) (http.Handler, *store.DB, *auth.Service) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{AllowedOrigins: []string{testOrigin}, CookieSecure: true}
-	return NewHandler(db, service, cfg), db, service
+	return NewHandler(Deps{DB: db, Auth: service, Config: cfg}), db, service
 }
 
 func authRequest(handler http.Handler, method, path, origin, ip, body string, cookie *http.Cookie) *httptest.ResponseRecorder {

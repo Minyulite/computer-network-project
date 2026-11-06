@@ -70,6 +70,51 @@ func TestPermanentErrorsAreNotRetriedButOthersFallBack(t *testing.T) {
 	}
 }
 
+func TestModelForUsesFallbacksOnRetries(t *testing.T) {
+	c := New(Config{Model: "main", Fallbacks: []string{"one", "two"}})
+	for attempt, want := range map[int]string{1: "main", 2: "one", 3: "two"} {
+		if got := c.modelFor(attempt); got != want {
+			t.Errorf("attempt %d: %s", attempt, got)
+		}
+	}
+	if got := New(Config{Model: "main"}).modelFor(3); got != "main" {
+		t.Errorf("no fallbacks: %s", got)
+	}
+}
+
+func TestParseResponseFailures(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status    int
+		body      string
+		permanent bool
+	}{
+		"rejected key":  {http.StatusBadRequest, `{"error":{"code":400,"message":"API key not valid"}}`, true},
+		"forbidden":     {http.StatusForbidden, `{"error":{"code":403,"message":"denied"}}`, true},
+		"overloaded":    {http.StatusServiceUnavailable, `{"error":{"code":503,"message":"overloaded"}}`, false},
+		"unknown model": {http.StatusNotFound, `{"error":{"code":404,"message":"no such model"}}`, false},
+		"not JSON":      {http.StatusBadGateway, `<html>`, false},
+		"no candidate":  {http.StatusOK, `{"candidates":[]}`, false},
+		"safety stop":   {http.StatusOK, `{"candidates":[{"finishReason":"SAFETY","content":{"parts":[]}}]}`, false},
+		"empty text":    {http.StatusOK, `{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"  "}]}}]}`, false},
+	} {
+		_, err := parseResponse(tc.status, []byte(tc.body))
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if isPermanent(err) != tc.permanent {
+			t.Errorf("%s: permanent = %v", name, isPermanent(err))
+		}
+	}
+}
+
+func TestParseResponseJoinsParts(t *testing.T) {
+	got, err := parseResponse(http.StatusOK, []byte(`{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"I "},{"text":"went."}]}}]}`))
+	if err != nil || got != "I went." {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
 func TestTruncatedAnswerIsIncomplete(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"half"}]}}]}`))

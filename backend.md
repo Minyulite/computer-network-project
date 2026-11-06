@@ -497,7 +497,7 @@ Each bot has a system user (`users.is_bot`, username `bot_<12 hex>`, unusable pa
 
 Commands (all payloads are strict objects): `bots.list` (`limit`, `cursor`; enabled bots only: id, name, owner), `bots.mine`, `bot.get` (`botId`; owner only), `bot.create` (`name`, `description`, `templates[{question, answer}]`), `bot.update` (`botId`, `name`, `description`, `enabled`, `templates`; the template set is replaced), `bot.open` (`botId`; returns the caller's room, creating it on first use). Events: `bot.upserted` (`bot` summary, to everyone; description and templates are never broadcast). Errors: `bot_unavailable`, `bot_limit`.
 
-Answering (`internal/botai`) runs outside the hub, like grammar: after `message.send` is acknowledged, a worker makes up to two Gemini calls and the stored reply returns to the hub as a control message that broadcasts `message.created`.
+Answering (`internal/ai/botai`) runs outside the hub, like grammar: after `message.send` is acknowledged, a worker makes up to two Gemini calls and the stored reply returns to the hub as a control message that broadcasts `message.created`.
 
 1. **Classify** (JSON schema): `template` (with label `tN`), `in_scope` or `out_of_scope`, from the shop description, template questions (never their answers), the last 8 turns and the new message.
 2. `template`: the owner's answer is sent verbatim. An unknown label is never guessed; it falls back to `in_scope`.
@@ -553,19 +553,31 @@ apps/api/
       service.go                  # Signup/login/logout/session behavior
       password.go                 # Argon2id encoding and verification
       session.go                  # Token generation and session lookup
+    id/id.go                      # UUID creation and validation
     chat/
       service.go                  # Direct/group rules and authorization
+      bots.go                     # Shop bot configuration and replies
+      validate.go, paging.go      # Shared input checks and cursor paging
       types.go                    # Public chat values and domain errors
+    ai/
+      llm/llm.go                  # The one Gemini client: retries, fallbacks
+      grammar/grammar.go          # Grammar prompt and output cleanup
+      botai/botai.go              # Shop bot classification and answers
     realtime/
       protocol.go                 # JSON envelopes and command payloads
+      events.go                   # Server frame and event names
       handler.go                  # Authenticated WebSocket upgrade
       hub.go                      # Connection registry and coordinator
       client.go                   # Socket read/write loops and lifecycle
-      dispatch.go                 # Commands -> services -> recipient events
+      router.go                   # Command table, session check, rate limits
+      cmd_rooms.go, cmd_messages.go, cmd_bots.go  # Commands -> services -> events
+      errors.go                   # Error -> protocol code table
+      rate.go                     # Per-user token buckets
+      grammar.go, bot.go          # AI workers that run outside the hub
     httpapi/
-      router.go                   # HTTP route registration
+      handler.go                  # HTTP route registration and health
       auth_handlers.go            # HTTP auth contracts and cookies
-      middleware.go               # Origin/CORS, limits, logging
+      middleware.go               # Origin/CORS for /auth/
   go.mod
   go.sum
   .env.example

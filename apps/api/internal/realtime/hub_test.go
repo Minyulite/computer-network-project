@@ -7,6 +7,7 @@ import (
 
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
+	"example.com/computer-network/project/apps/api/internal/id"
 )
 
 func TestQueueOverflowRemovesOnlySlowClient(t *testing.T) {
@@ -35,7 +36,7 @@ func TestHistoryResponseCapPreservesContinuation(t *testing.T) {
 	for i := range messages {
 		messages[i] = chat.Message{Seq: int64(i + 1), Text: strings.Repeat("界", 2000)}
 	}
-	original := chat.HistoryPage{RoomID: uuid(), Messages: messages, UpToSeq: 50}
+	original := chat.HistoryPage{RoomID: id.MustNew(), Messages: messages, UpToSeq: 50}
 	for _, forward := range []bool{false, true} {
 		page := fitHistory(original, forward, "history")
 		if len(wire("request.ok", "history", page)) > responseLimit || !page.HasMore || len(page.Messages) == len(messages) {

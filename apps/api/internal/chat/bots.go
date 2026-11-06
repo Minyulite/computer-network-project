@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
@@ -79,15 +79,12 @@ func botValue(r store.BotRecord) Bot {
 	return Bot{ID: r.ID, Name: r.Name, OwnerID: r.OwnerID, OwnerUsername: r.OwnerUsername, Enabled: r.Enabled, CreatedAt: r.CreatedAt}
 }
 
-func cleanText(value string, min, max int) (string, error) {
-	if !utf8.ValidString(value) {
-		return "", ErrInvalidInput
+func templateValues(records []store.BotTemplateRecord) []BotTemplate {
+	templates := make([]BotTemplate, 0, len(records))
+	for _, t := range records {
+		templates = append(templates, BotTemplate{ID: t.ID, Question: t.Question, Answer: t.Answer})
 	}
-	value = strings.TrimSpace(value)
-	if count := utf8.RuneCountInString(value); count < min || count > max {
-		return "", ErrInvalidInput
-	}
-	return value, nil
+	return templates
 }
 
 func validateBot(input BotInput) (BotInput, []store.BotTemplateRecord, error) {
@@ -112,11 +109,11 @@ func validateBot(input BotInput) (BotInput, []store.BotTemplateRecord, error) {
 		if err != nil {
 			return BotInput{}, nil, err
 		}
-		id, err := newUUID()
+		templateID, err := id.New()
 		if err != nil {
 			return BotInput{}, nil, err
 		}
-		records = append(records, store.BotTemplateRecord{ID: id, Question: question, Answer: answer})
+		records = append(records, store.BotTemplateRecord{ID: templateID, Question: question, Answer: answer})
 	}
 	return BotInput{Name: name, Description: description, Enabled: input.Enabled}, records, nil
 }
@@ -126,11 +123,16 @@ func (s *Service) botDetail(ctx context.Context, record store.BotRecord) (BotDet
 	if err != nil {
 		return BotDetail{}, err
 	}
-	detail := BotDetail{Bot: botValue(record), Description: record.Description, Templates: make([]BotTemplate, 0, len(templates))}
-	for _, t := range templates {
-		detail.Templates = append(detail.Templates, BotTemplate{ID: t.ID, Question: t.Question, Answer: t.Answer})
+	return BotDetail{Bot: botValue(record), Description: record.Description, Templates: templateValues(templates)}, nil
+}
+
+// newBotUsername returns the hidden username of a bot's system user.
+func newBotUsername() (string, error) {
+	var suffix [6]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
 	}
-	return detail, nil
+	return "bot_" + hex.EncodeToString(suffix[:]), nil
 }
 
 func (s *Service) CreateBot(ctx context.Context, caller auth.Identity, input BotInput) (BotDetail, error) {
@@ -142,27 +144,26 @@ func (s *Service) CreateBot(ctx context.Context, caller auth.Identity, input Bot
 	if err != nil {
 		return BotDetail{}, err
 	}
-	botID, err := newUUID()
+	botID, err := id.New()
 	if err != nil {
 		return BotDetail{}, err
 	}
-	botUserID, err := newUUID()
+	botUserID, err := id.New()
 	if err != nil {
 		return BotDetail{}, err
 	}
-	var suffix [6]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
+	username, err := newBotUsername()
+	if err != nil {
 		return BotDetail{}, err
 	}
 	record, err := s.db.CreateBot(ctx, store.BotRecord{ID: botID, OwnerID: userID, UserID: botUserID,
-		Username: "bot_" + hex.EncodeToString(suffix[:]), Name: clean.Name, Description: clean.Description, Enabled: true}, templates)
-	if errors.Is(err, store.ErrBotLimit) {
+		Username: username, Name: clean.Name, Description: clean.Description, Enabled: true}, templates)
+	switch {
+	case errors.Is(err, store.ErrBotLimit):
 		return BotDetail{}, ErrBotLimit
-	}
-	if errors.Is(err, store.ErrNotFound) {
+	case errors.Is(err, store.ErrNotFound):
 		return BotDetail{}, ErrUnauthenticated
-	}
-	if err != nil {
+	case err != nil:
 		return BotDetail{}, err
 	}
 	return s.botDetail(ctx, record)
@@ -173,7 +174,7 @@ func (s *Service) UpdateBot(ctx context.Context, caller auth.Identity, botID str
 	if err != nil {
 		return BotDetail{}, err
 	}
-	botID, err = canonicalUUID(botID)
+	botID, err = parseID(botID)
 	if err != nil {
 		return BotDetail{}, err
 	}
@@ -198,7 +199,7 @@ func (s *Service) GetBot(ctx context.Context, caller auth.Identity, botID string
 	if err != nil {
 		return BotDetail{}, err
 	}
-	botID, err = canonicalUUID(botID)
+	botID, err = parseID(botID)
 	if err != nil {
 		return BotDetail{}, err
 	}
@@ -240,15 +241,7 @@ func (s *Service) BotCatalog(ctx context.Context, caller auth.Identity, options 
 	if err != nil {
 		return Page[Bot]{}, err
 	}
-	page := Page[Bot]{Items: make([]Bot, 0, min(len(records), options.Limit))}
-	if len(records) > options.Limit {
-		page.NextCursor = records[options.Limit-1].ID
-		records = records[:options.Limit]
-	}
-	for _, record := range records {
-		page.Items = append(page.Items, botValue(record))
-	}
-	return page, nil
+	return paginate(records, options.Limit, func(r store.BotRecord) string { return r.ID }, botValue), nil
 }
 
 // OpenBot opens (or returns) the caller's private room with a bot. Owners may
@@ -258,11 +251,11 @@ func (s *Service) OpenBot(ctx context.Context, caller auth.Identity, botID strin
 	if err != nil {
 		return Room{}, false, err
 	}
-	botID, err = canonicalUUID(botID)
+	botID, err = parseID(botID)
 	if err != nil {
 		return Room{}, false, err
 	}
-	roomID, err := newUUID()
+	roomID, err := id.New()
 	if err != nil {
 		return Room{}, false, err
 	}
@@ -294,8 +287,8 @@ func (s *Service) BotRoomContext(ctx context.Context, roomID string) (BotContext
 		return BotContext{}, err
 	}
 	result := BotContext{BotID: record.ID, Name: record.Name, Description: record.Description, Enabled: record.Enabled}
-	for _, t := range templates {
-		result.Templates = append(result.Templates, BotTemplate{ID: t.ID, Question: t.Question, Answer: t.Answer})
+	if len(templates) > 0 {
+		result.Templates = templateValues(templates)
 	}
 	for _, m := range messages {
 		result.History = append(result.History, BotTurn{FromBot: m.SenderID == record.UserID, Text: m.Text})
@@ -306,27 +299,23 @@ func (s *Service) BotRoomContext(ctx context.Context, roomID string) (BotContext
 // replyClientID derives the bot reply's idempotency key from the customer
 // message, so answering the same message twice stores one reply.
 func replyClientID(customerMessageID string) string {
-	sum := sha256.Sum256([]byte("bot-reply:" + customerMessageID))
-	b := sum[:16]
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	raw := hex.EncodeToString(b)
-	return raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:]
+	return id.FromSeed("bot-reply:" + customerMessageID)
 }
 
 // SendBotReply stores the bot's answer to a customer message as the bot's system user.
 func (s *Service) SendBotReply(ctx context.Context, roomID, customerMessageID, text string) (SendResult, error) {
-	roomID, err := canonicalUUID(roomID)
+	roomID, err := parseID(roomID)
 	if err != nil {
 		return SendResult{}, err
 	}
-	customerMessageID, err = canonicalUUID(customerMessageID)
+	customerMessageID, err = parseID(customerMessageID)
 	if err != nil {
 		return SendResult{}, err
 	}
 	if !utf8.ValidString(text) {
 		return SendResult{}, ErrInvalidInput
 	}
+	// A long AI answer is cut rather than rejected, so the customer still gets one.
 	text = strings.TrimSpace(text)
 	if utf8.RuneCountInString(text) > maxBotReplyRunes {
 		text = string([]rune(text)[:maxBotReplyRunes])
@@ -341,27 +330,10 @@ func (s *Service) SendBotReply(ctx context.Context, roomID, customerMessageID, t
 	if err != nil {
 		return SendResult{}, err
 	}
-	messageID, err := newUUID()
-	if err != nil {
-		return SendResult{}, err
-	}
-	record, created, err := s.db.SaveMessage(ctx, store.MessageRecord{ID: messageID, RoomID: roomID,
+	record, created, err := s.storeMessage(ctx, store.MessageRecord{RoomID: roomID,
 		SenderID: bot.UserID, ClientMessageID: replyClientID(customerMessageID), Text: text})
-	if errors.Is(err, store.ErrNotFound) {
-		return SendResult{}, ErrRoomUnavailable
-	}
-	if errors.Is(err, store.ErrSequenceExhausted) {
-		return SendResult{}, ErrSequenceExhausted
-	}
 	if err != nil {
 		return SendResult{}, err
 	}
-	result := SendResult{RoomKind: "bot", Message: messageValue(record, bot.Username), Created: created}
-	if created {
-		result.RecipientUserIDs, err = s.db.EligibleMemberIDs(ctx, roomID, record.Seq)
-		if err != nil {
-			return SendResult{}, err
-		}
-	}
-	return result, nil
+	return s.sendResult(ctx, RoomBot, record, bot.Username, created)
 }

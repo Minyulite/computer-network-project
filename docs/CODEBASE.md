@@ -13,7 +13,7 @@
 | Backend | Go 1.26, `net/http`, `github.com/coder/websocket`, `pgx` | `apps/api` |
 | Frontend | Next.js 16 (App Router), React 19, TypeScript — **ไม่มี UI/state library เพิ่ม** | `apps/web` |
 | Database | PostgreSQL 18 (Docker Compose) | `compose.yaml`, `infra/postgres` |
-| AI | Google Gemini ผ่าน HTTPS (แก้ grammar) | `apps/api/internal/grammar` |
+| AI | Google Gemini ผ่าน HTTPS (แก้ grammar, ตอบแชตบอท) | `apps/api/internal/ai/` |
 
 ความสามารถ: สมัคร/เข้าสู่ระบบ, แชตส่วนตัว (direct), กลุ่ม (สร้าง/เข้าเอง), online presence, หลายอุปกรณ์ต่อบัญชี, reconnect + กู้ข้อความ, แก้ grammar ด้วย AI, สลับภาษาแป้นพิมพ์ไทย↔อังกฤษ (Ctrl+Shift)
 
@@ -50,10 +50,14 @@ Browser (Next.js, client-side)
     │   ├── cmd/api/main.go           composition root: wiring + graceful shutdown
     │   └── internal/
     │       ├── config/               อ่าน/validate env และ .env
+    │       ├── id/                   สร้าง/ตรวจ UUID (ใช้ร่วมทุก package)
     │       ├── store/                SQL ทั้งหมด (pgx), migrations (embed)
     │       ├── auth/                 password (Argon2id), session, rate limit
-    │       ├── chat/                 business rule ของห้อง/ข้อความ
-    │       ├── grammar/              client เรียก Gemini
+    │       ├── chat/                 business rule ของห้อง/ข้อความ/บอท
+    │       ├── ai/
+    │       │   ├── llm/              Gemini client ตัวเดียว (retry + fallback)
+    │       │   ├── grammar/          prompt + cleanOutput ของการแก้ grammar
+    │       │   └── botai/            ตอบลูกค้าแทนร้าน
     │       ├── httpapi/              HTTP routes (/health, /auth/*) + CORS/Origin
     │       └── realtime/             WebSocket hub (หัวใจของ real-time)
     └── web/                          Next.js frontend
@@ -72,18 +76,20 @@ Browser (Next.js, client-side)
 ### 3.1 ชั้น (layering) และทิศทาง dependency
 
 ```
-cmd/api → httpapi, realtime → chat, auth, grammar → store
-                config (อ่านครั้งเดียวใน main)
+cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai/llm
+                config (อ่านครั้งเดียวใน main) ; id ใช้ได้ทุกชั้น
 ```
 
 | ชั้น | หน้าที่ | ห้ามทำ |
 |---|---|---|
-| `store` | SQL, transaction, map error ของ DB → sentinel (`ErrNotFound`, …) | ไม่รู้จัก HTTP/WS, ไม่ตัดสิน business rule |
-| `auth`, `chat`, `grammar` | business rule, validate input, แปลง record → type ที่ส่งออก (JSON tag) | ไม่แตะ `http`/`websocket` |
+| `store` | SQL, transaction, map error ของ DB → sentinel (`ErrNotFound`, …), ค่า `rooms.kind` (`RoomDirect/Group/Bot`) | ไม่รู้จัก HTTP/WS, ไม่ตัดสิน business rule |
+| `auth`, `chat`, `ai/*` | business rule, validate input, แปลง record → type ที่ส่งออก (JSON tag) | ไม่แตะ `http`/`websocket` |
 | `httpapi` | decode JSON, set cookie, ตรวจ Origin, แปลง error → HTTP status | ไม่เขียน SQL |
-| `realtime` | protocol, connection, dispatch, broadcast | ไม่เขียน SQL ตรงๆ (เรียกผ่าน `chat`/`auth`) |
+| `realtime` | protocol, connection, route คำสั่ง, broadcast | ไม่เขียน SQL ตรงๆ (เรียกผ่าน `chat`/`auth`) |
 
-`main.go` ประกอบ object ด้วยมือ (ไม่มี DI framework): `config.Load → store.Open → store.Migrate → auth.New → grammar.New → realtime.New(auth, chat, grammar, origins) → authService.SetRevocationNotifier(hub) → httpapi.NewHandler`. ปิดระบบด้วย `signal.NotifyContext` แล้ว `server.Shutdown` + `hub.Shutdown`
+**Dependency เป็น interface ฝั่งผู้ใช้** ("accept interfaces, return structs"): `realtime` ประกาศ `Authenticator`, `ChatService`, `GrammarCorrector`, `BotReplier`; `grammar`/`botai` ประกาศ `Generator`; `httpapi` ประกาศ `Pinger` — test ใส่ fake ได้โดยไม่ต้องต่อ DB/AI
+
+`main.go` ประกอบ object ด้วยมือ (ไม่มี DI framework) ใน `run() error` (ให้ `defer` ทำงานครบ): `config.Load → store.Open → store.Migrate → auth.New → llm.New (ตัวเดียวใช้ร่วม) → chat.New → realtime.New(auth, chat, grammar.New(ai), botai.New(ai, chat), origins) → authService.SetRevocationNotifier(hub) → httpapi.NewHandler(httpapi.Deps{…})`. ปิดระบบด้วย `signal.NotifyContext` แล้ว `server.Shutdown` + `hub.Shutdown`
 
 ### 3.2 Config (`internal/config`)
 - `Load()` อ่าน `.env` ใน working directory (`godotenv`) → `Parse(getenv)` (แยกเพื่อ test ง่าย)
@@ -147,10 +153,12 @@ cmd/api → httpapi, realtime → chat, auth, grammar → store
 - คำสั่ง: `users.list`, `rooms.list`, `groups.list`, `groups.members`, `direct.open`, `group.create`, `group.join`, `message.send`, `room.history`, `grammar.correct`
 - response จำกัด 256 KiB — `fitHistory` ตัด history ให้พอดีแล้วตั้ง `hasMore` + cursor ต่อ
 
-**Dispatch (`dispatch.go`)** — ทุกคำสั่งผ่านขั้นตอนเดียวกัน:
-1. ตรวจ client ยังอยู่ → 2. `ValidateSessionID` ซ้ำ (session ถูก revoke = เตะออก) → 3. rate limit (token bucket: ทุกคำสั่ง 20/s burst 40, send 5/s burst 10, grammar 0.5/s burst 5) → 4. `switch Type` : decode payload ด้วย `payloadInto` → เรียก `chat.*` → `h.ok`/`h.fail`
-- Pattern การตอบ: เคสที่ต้อง broadcast เพิ่ม (`direct.open`, `group.*`, `message.send`) เรียก `h.ok` แล้ว `return` เอง ; ที่เหลือตกไปท้ายฟังก์ชัน
-- **แปลง error → code** รวมศูนย์ที่ `Hub.fail` (`errors.Is` → `{code, message}` คงที่) ❗ error ภายในไม่รั่วออก client; เพิ่ม error ใหม่ต้องเพิ่ม case ที่นี่
+**Router (`router.go`)** — ทุกคำสั่งผ่าน `handleCommand` ขั้นตอนเดียวกัน:
+1. ตรวจ client ยังอยู่ → 2. `ValidateSessionID` ซ้ำ (session ถูก revoke = เตะออก) → 3. rate limit (`rate.go` token bucket: ทุกคำสั่ง 20/s burst 40 + limit เฉพาะ route: send 5/s burst 10, grammar 0.5/s burst 5) → 4. หา `routes[type]` → `handle[P]` decode payload ด้วย `payloadInto` → เรียก handler → `h.ok`/`h.fail`
+- Handler แยกไฟล์ตาม domain: `cmd_rooms.go`, `cmd_messages.go`, `cmd_bots.go`, `grammar.go` ; signature `func (h *Hub) xxx(r request, p xxxRequest) (any, error)`
+- Pattern การตอบ: return ค่า → router ส่ง `request.ok` ให้ ; ถ้าต้อง broadcast หลังตอบ (`direct.open`, `group.*`, `message.send`, `bot.*`) เรียก `h.reply(r, …)` → broadcast → `return answered{}, nil` (ลำดับ: ผู้ขอได้ ok ก่อน event เสมอ)
+- ชื่อ event อยู่ที่ `events.go` (`eventRoomUpserted`, …)
+- **แปลง error → code** รวมศูนย์ที่ตาราง `errorCodes` ใน `errors.go` (`errors.Is` → `{code, message}` คงที่) ❗ error ภายในไม่รั่วออก client; เพิ่ม error ใหม่ต้องเพิ่มแถวที่นี่
 - Broadcast: `broadcastAll`, `broadcastUsers(ids…)`; ข้อความส่งถึง `RecipientUserIDs` ที่ `chat` คำนวณ (`EligibleMemberIDs`) — ผู้ใช้ทุกอุปกรณ์ได้รับ
 - Limits: 200 connection รวม, 10 ต่อผู้ใช้ (`errCapacity`)
 
@@ -158,19 +166,20 @@ cmd/api → httpapi, realtime → chat, auth, grammar → store
 
 **Handler (`handler.go`)** — upgrade WebSocket: ตรวจ Origin ตรง 1 ค่า → อ่านคุกกี้ → `ValidateSession` → `websocket.Accept` → `register` ผ่าน hub → `client.start()` (`InsecureSkipVerify` ที่ Accept ปิดเพราะตรวจ Origin เองแล้ว)
 
-### 3.8 Grammar (`internal/grammar`)
-- `Service.Correct(ctx, text, before, after)`: `before/after` เป็น context เท่านั้น ไม่ถูกแก้
-- มี model หลัก + fallback ตามลำดับ, แยก error ถาวร (`isPermanent`) ออกจากชั่วคราว
-- ผ่าน sentinel error: `ErrInvalidInput`, `ErrNotConfigured`, `ErrIncomplete`, `ErrUnavailable`
-- `buildPrompt` / `cleanOutput` (ลบ quote/whitespace ที่ AI เติม), ตรวจผลไม่ครบ (`parseResponse`)
+### 3.8 AI (`internal/ai`)
+- **`llm`** — Gemini client ตัวเดียวของทั้งระบบ: model หลัก + fallback ตามลำดับ, แยก error ถาวร (`isPermanent`) ออกจากชั่วคราว, `Request.Timeout` (ค่าเริ่มต้น 30s), `JSONSchema` บังคับ output JSON ; sentinel `ErrNotConfigured`, `ErrIncomplete`, `ErrUnavailable`
+- **`grammar`** — `Service.Correct(ctx, text, before, after)` เรียก `llm.Generator`: `before/after` เป็น context เท่านั้น ไม่ถูกแก้ ; `buildPrompt` / `cleanOutput` (ลบ quote/whitespace ที่ AI เติม) ; งบเวลา 45s ; error ของ llm ใช้ชื่อเดิม (`grammar.ErrIncomplete` = `llm.ErrIncomplete`)
+- **`botai`** — classify (template / in_scope / out_of_scope) แล้วตอบ ; AI ล่ม → ตอบคำขอโทษแทน
 - ไม่มี `GEMINI_API_KEY` → ปิด feature ไม่ใช่ mock
 
 ### 3.9 Convention การเขียน Go
 - Error: sentinel `var ErrXxx = errors.New(…)` ต่อ package; ตรวจด้วย `errors.Is`; message ที่ส่งออกภายนอกเป็นข้อความคงที่
 - ทุกฟังก์ชันที่แตะ IO รับ `ctx context.Context` ตัวแรก
-- Validation อยู่ใน service (ไม่เชื่อ client): `canonicalUUID`, นับ rune ด้วย `utf8.RuneCountInString`, `utf8.ValidString`, `strings.TrimSpace`
+- Validation อยู่ใน service (ไม่เชื่อ client): `chat/validate.go` — `callerID`, `parseID` (ผ่าน `id.Canonical`), `cleanText(value, min, max)` (UTF-8 + trim + นับ rune)
+- ID ทั้งหมดสร้างด้วย `id.New()` ; idempotency key ที่ต้องคงที่ใช้ `id.FromSeed(seed)`
+- Pagination ใน `chat/paging.go`: ดึง `limit+1` แล้ว `paginate(records, limit, key, convert)` ; สิทธิ์เข้าห้องผ่าน `authorizeRoom` ; บันทึกข้อความผ่าน `storeMessage` + `sendResult`
 - JSON struct tag เป็น camelCase (`roomId`, `clientMessageId`); เวลาเป็น `time.Time` (RFC 3339)
-- Request payload ของ WS เป็น struct เล็กๆ ท้องถิ่นใน `dispatch.go` (`sendRequest`, `historyRequest`, …)
+- Request payload ของ WS เป็น struct เล็กๆ ท้องถิ่นในไฟล์ `cmd_*.go` ของ domain นั้น (`sendRequest`, `historyRequest`, …)
 - Module path เป็น placeholder `example.com/computer-network/project/apps/api`
 
 ### 3.10 Testing (Go)
@@ -272,8 +281,8 @@ cmd/api → httpapi, realtime → chat, auth, grammar → store
 ### เพิ่มคำสั่ง WebSocket ใหม่ (เช่น `message.delete`)
 1. `store/` — เพิ่ม method SQL (+ migration `00N_*.sql` ถ้าเปลี่ยน schema)
 2. `chat/service.go` — เพิ่ม method: validate input, ตรวจสิทธิ์, map error; เพิ่ม type/ sentinel ใน `chat/types.go`
-3. `realtime/dispatch.go` — เพิ่ม request struct + `case "xxx"` ใน `handleCommand` (ถ้าต้อง broadcast ให้ `h.ok` แล้ว `return`) ; ถ้าต้อง rate limit เฉพาะ เพิ่ม bucket ใน `userRates`
-4. `Hub.fail` — เพิ่ม mapping error ใหม่ → code/message
+3. `realtime/cmd_<domain>.go` — เพิ่ม request struct + method `func (h *Hub) xxx(r request, p xxxRequest) (any, error)` (ถ้าต้อง broadcast: `h.reply` → broadcast → `return answered{}, nil`) ; ลงทะเบียนใน `routes` (`router.go`) ใส่ `limit:` ถ้าต้อง rate limit เฉพาะ ; เพิ่มชื่อ event ใน `events.go` และ method ใน interface `ChatService` (`hub.go`)
+4. `realtime/errors.go` — เพิ่มแถว error ใหม่ → code/message ในตาราง `errorCodes`
 5. ถ้ามี event push ใหม่: เพิ่มใน `ServerEvent` (`web/src/lib/chat/types.ts`) และ `applyEvent` ใน `store.ts`
 6. Frontend: เพิ่ม method ใน `ChatStore` (ใช้ `this.socket.request` / `this.read`, เช็ค `generation`), เรียกจาก `chat-app.tsx`
 7. อัปเดต `backend.md` §7, เพิ่ม test (service ด้วย DB จริง, hub/integration)
@@ -292,12 +301,12 @@ cmd/api → httpapi, realtime → chat, auth, grammar → store
 
 ### Shop assistants (chatbot) — มีแล้ว
 - Schema: `002_bots.sql` (`bots`, `bot_templates`, `users.is_bot`, `rooms.kind='bot'` + `bot_id/bot_customer_id`)
-- `store/bots.go` (SQL), `chat/bots.go` (validation, limits 5 บอท/ผู้ใช้, 20 template/บอท, `SendBotReply` idempotent), `llm/` (Gemini client ใช้ร่วม — `grammar/` ยังมี transport ของตัวเองซ้ำอยู่), `botai/` (classify → template/in_scope/out_of_scope), `realtime/bot.go` (worker นอก hub แบบเดียวกับ grammar)
+- `store/bots.go` (SQL), `chat/bots.go` (validation, limits 5 บอท/ผู้ใช้, 20 template/บอท, `SendBotReply` idempotent), `ai/llm/` (Gemini client ใช้ร่วมกับ grammar), `ai/botai/` (classify → template/in_scope/out_of_scope), `realtime/bot.go` (worker นอก hub แบบเดียวกับ grammar)
 - ทุกบอทมี system user เป็นสมาชิกห้อง bot คู่กับลูกค้า เจ้าของไม่ใช่สมาชิก จึงอ่านแชตไม่ได้โดยโครงสร้าง
 - Frontend: `components/bot-manager.tsx`, `ChatStore.saveBot/getBot/openBot`, event `bot.upserted`
 
 ### เพิ่มความสามารถ AI อีกตัว
-ทำตาม pattern grammar: service แยกใน `internal/<name>` + interface เล็กใน `realtime` + `start…`/`finish…` ที่ไม่บล็อก hub (worker → `control` channel → hub ตอบ) + จำกัด in-flight และ rate limit ต่อผู้ใช้
+ทำตาม pattern grammar: service แยกใน `internal/ai/<name>` ที่เรียก `llm.Generator` (อย่าเขียน HTTP client ใหม่) + interface เล็กใน `realtime` + `start…`/`finish…` ที่ไม่บล็อก hub (worker → `control` channel → hub ตอบ) + จำกัด in-flight และ rate limit ต่อผู้ใช้
 
 ---
 
