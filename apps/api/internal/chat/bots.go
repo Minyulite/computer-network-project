@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/avatar"
 	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
@@ -30,6 +31,7 @@ type Bot struct {
 	Name          string    `json:"name"`
 	OwnerID       string    `json:"ownerId"`
 	OwnerUsername string    `json:"ownerUsername"`
+	Avatar        string    `json:"avatar"`
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
@@ -54,6 +56,7 @@ type BotTemplateInput struct {
 
 type BotInput struct {
 	Name        string
+	Avatar      string // Empty keeps the current picture, or picks one for a new bot.
 	Description string
 	Enabled     bool
 	Templates   []BotTemplateInput
@@ -76,7 +79,7 @@ type BotContext struct {
 }
 
 func botValue(r store.BotRecord) Bot {
-	return Bot{ID: r.ID, Name: r.Name, OwnerID: r.OwnerID, OwnerUsername: r.OwnerUsername, Enabled: r.Enabled, CreatedAt: r.CreatedAt}
+	return Bot{ID: r.ID, Name: r.Name, OwnerID: r.OwnerID, OwnerUsername: r.OwnerUsername, Avatar: r.Avatar, Enabled: r.Enabled, CreatedAt: r.CreatedAt}
 }
 
 func templateValues(records []store.BotTemplateRecord) []BotTemplate {
@@ -95,6 +98,9 @@ func validateBot(input BotInput) (BotInput, []store.BotTemplateRecord, error) {
 	description, err := cleanText(input.Description, 0, maxBotDescription)
 	if err != nil {
 		return BotInput{}, nil, err
+	}
+	if input.Avatar != "" && !avatar.ValidBot(input.Avatar) {
+		return BotInput{}, nil, ErrInvalidInput
 	}
 	if len(input.Templates) > MaxBotTemplates {
 		return BotInput{}, nil, ErrInvalidInput
@@ -115,7 +121,7 @@ func validateBot(input BotInput) (BotInput, []store.BotTemplateRecord, error) {
 		}
 		records = append(records, store.BotTemplateRecord{ID: templateID, Question: question, Answer: answer})
 	}
-	return BotInput{Name: name, Description: description, Enabled: input.Enabled}, records, nil
+	return BotInput{Name: name, Avatar: input.Avatar, Description: description, Enabled: input.Enabled}, records, nil
 }
 
 func (s *Service) botDetail(ctx context.Context, record store.BotRecord) (BotDetail, error) {
@@ -156,8 +162,11 @@ func (s *Service) CreateBot(ctx context.Context, caller auth.Identity, input Bot
 	if err != nil {
 		return BotDetail{}, err
 	}
+	if clean.Avatar == "" {
+		clean.Avatar = avatar.RandomBot()
+	}
 	record, err := s.db.CreateBot(ctx, store.BotRecord{ID: botID, OwnerID: userID, UserID: botUserID,
-		Username: username, Name: clean.Name, Description: clean.Description, Enabled: true}, templates)
+		Username: username, Name: clean.Name, Avatar: clean.Avatar, Description: clean.Description, Enabled: true}, templates)
 	switch {
 	case errors.Is(err, store.ErrBotLimit):
 		return BotDetail{}, ErrBotLimit
@@ -183,7 +192,7 @@ func (s *Service) UpdateBot(ctx context.Context, caller auth.Identity, botID str
 		return BotDetail{}, err
 	}
 	record, err := s.db.UpdateBot(ctx, userID, store.BotRecord{ID: botID, Name: clean.Name,
-		Description: clean.Description, Enabled: clean.Enabled}, templates)
+		Avatar: clean.Avatar, Description: clean.Description, Enabled: clean.Enabled}, templates)
 	if errors.Is(err, store.ErrNotFound) {
 		return BotDetail{}, ErrBotUnavailable
 	}
@@ -335,5 +344,5 @@ func (s *Service) SendBotReply(ctx context.Context, roomID, customerMessageID, t
 	if err != nil {
 		return SendResult{}, err
 	}
-	return s.sendResult(ctx, RoomBot, record, bot.Username, created)
+	return s.sendResult(ctx, RoomBot, record, bot.Username, bot.Avatar, created)
 }

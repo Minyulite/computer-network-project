@@ -20,6 +20,7 @@ type BotRecord struct {
 	UserID        string // The system user that sends the bot's replies.
 	Username      string // That system user's username.
 	Name          string
+	Avatar        string
 	Description   string
 	Enabled       bool
 	CreatedAt     time.Time
@@ -31,13 +32,13 @@ type BotTemplateRecord struct {
 	Answer   string
 }
 
-const botColumns = `b.id, b.owner_id, o.username, b.user_id, bu.username, b.name, b.description, b.enabled, b.created_at`
+const botColumns = `b.id, b.owner_id, o.username, b.user_id, bu.username, b.name, b.avatar, b.description, b.enabled, b.created_at`
 const botJoins = ` FROM bots b JOIN users o ON o.id = b.owner_id JOIN users bu ON bu.id = b.user_id`
 
 func scanBot(row pgx.Row) (BotRecord, error) {
 	var bot BotRecord
 	err := row.Scan(&bot.ID, &bot.OwnerID, &bot.OwnerUsername, &bot.UserID, &bot.Username,
-		&bot.Name, &bot.Description, &bot.Enabled, &bot.CreatedAt)
+		&bot.Name, &bot.Avatar, &bot.Description, &bot.Enabled, &bot.CreatedAt)
 	return bot, err
 }
 
@@ -76,12 +77,12 @@ func (db *DB) CreateBot(parent context.Context, bot BotRecord, templates []BotTe
 		return BotRecord{}, ErrBotLimit
 	}
 	// "!" is not a valid Argon2id encoding, so this account can never sign in.
-	if _, err := tx.Exec(ctx, `INSERT INTO users (id, username, password_hash, is_bot) VALUES ($1, $2, '!', true)`,
-		bot.UserID, bot.Username); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO users (id, username, avatar, password_hash, is_bot) VALUES ($1, $2, $3, '!', true)`,
+		bot.UserID, bot.Username, bot.Avatar); err != nil {
 		return BotRecord{}, mapUserWriteError(err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO bots (id, owner_id, user_id, name, description, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6)`, bot.ID, bot.OwnerID, bot.UserID, bot.Name, bot.Description, bot.Enabled); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO bots (id, owner_id, user_id, name, avatar, description, enabled)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, bot.ID, bot.OwnerID, bot.UserID, bot.Name, bot.Avatar, bot.Description, bot.Enabled); err != nil {
 		return BotRecord{}, err
 	}
 	if err := insertTemplates(ctx, tx, bot.ID, templates); err != nil {
@@ -107,13 +108,17 @@ func (db *DB) UpdateBot(parent context.Context, ownerID string, bot BotRecord, t
 		return BotRecord{}, err
 	}
 	defer tx.Rollback(context.Background())
-	tag, err := tx.Exec(ctx, `UPDATE bots SET name = $3, description = $4, enabled = $5, updated_at = now()
-		WHERE id = $1 AND owner_id = $2`, bot.ID, ownerID, bot.Name, bot.Description, bot.Enabled)
+	tag, err := tx.Exec(ctx, `UPDATE bots SET name = $3, avatar = COALESCE(NULLIF($6, ''), avatar), description = $4, enabled = $5, updated_at = now()
+		WHERE id = $1 AND owner_id = $2`, bot.ID, ownerID, bot.Name, bot.Description, bot.Enabled, bot.Avatar)
 	if err != nil {
 		return BotRecord{}, err
 	}
 	if tag.RowsAffected() == 0 {
 		return BotRecord{}, ErrNotFound
+	}
+	// The bot's system user sends its replies, so its picture follows the bot's.
+	if _, err := tx.Exec(ctx, `UPDATE users u SET avatar = b.avatar FROM bots b WHERE b.id = $1 AND u.id = b.user_id`, bot.ID); err != nil {
+		return BotRecord{}, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM bot_templates WHERE bot_id = $1`, bot.ID); err != nil {
 		return BotRecord{}, err

@@ -96,7 +96,7 @@ func TestMigrationsFreshRepeatedConcurrentAndRestart(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name IN ('users','sessions','rooms','room_members','messages')").Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 3 || tables != 5 {
+	if versions != 4 || tables != 5 {
 		t.Fatalf("versions=%d tables=%d", versions, tables)
 	}
 	_, err = db.Pool.Exec(ctx, "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)", "00000000-0000-0000-0000-000000000001", "persisted", "fixture")
@@ -131,7 +131,7 @@ func TestFailedMigrationRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migrations = append(migrations, migration{version: 4, name: "004_broken.sql", sql: "CREATE TABLE users (id integer)"})
+	migrations = append(migrations, migration{version: 5, name: "005_broken.sql", sql: "CREATE TABLE users (id integer)"})
 	if err := applyMigrations(ctx, db.Pool, migrations); err == nil {
 		t.Fatal("broken migration succeeded")
 	}

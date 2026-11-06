@@ -73,7 +73,7 @@ export class ChatStore {
   private applyEvent(event: ServerEvent) {
     switch (event.type) {
       case "presence.changed": {
-        const user = { id: event.payload.userId, username: event.payload.username };
+        const user = { id: event.payload.userId, username: event.payload.username, avatar: event.payload.avatar };
         this.remember([user]);
         this.patch({ online: event.payload.online ? upsert(this.state.online, user) : this.state.online.filter(item => item.id !== user.id) });
         break;
@@ -87,6 +87,9 @@ export class ChatStore {
         const { roomId, member } = event.payload;
         this.remember([member]);
         // Refetch with timestamps; never fabricate membership metadata.
+        // The list shows the first two members' pictures; fill the second one in.
+        this.patch({ groups: this.state.groups.map(group => group.id !== roomId || group.preview.length >= 2 || group.preview.some(user => user.id === member.id)
+          ? group : { ...group, preview: [...group.preview, member] }) });
         if (this.state.selected === roomId) {
           if (this.memberTasks.has(roomId)) this.dirtyMembers.add(roomId);
           else void this.loadMembers(roomId);
@@ -162,6 +165,7 @@ export class ChatStore {
         const mine = await this.read<{ bots: Bot[] }>("bots.mine");
         if (generation !== this.generation) return;
         this.remember(online);
+        this.remember(rooms.flatMap(room => room.direct ?? []));
         this.patch({ online, groups, bots, rooms, myBots: mine.bots, members: {} });
       } catch (e) {
         if (generation === this.generation) this.patch({ error: `Could not refresh conversations. ${errorText(e)}` });
@@ -188,9 +192,11 @@ export class ChatStore {
   private async roomCommand(type: string, payload: object) {
     const generation = this.generation;
     const { room } = await this.socket.request<{ room: Room }>(type, payload);
-    if (generation !== this.generation) return;
+    if (generation !== this.generation) return undefined;
+    this.remember(room.direct ?? []);
     this.patch({ rooms: upsert(this.state.rooms, room) });
     this.select(room.id);
+    return room;
   }
   openDirect = (user: User) => { this.remember([user]); return this.roomCommand("direct.open", { receiverId: user.id }); };
   createGroup = (name: string) => this.roomCommand("group.create", { name });
@@ -200,14 +206,14 @@ export class ChatStore {
   // Creates the bot, or replaces its settings and whole template set when botId is given.
   saveBot = async (botId: string | undefined, input: BotInput) => {
     const generation = this.generation;
-    const payload = { name: input.name, description: input.description,
+    const payload = { name: input.name, avatar: input.avatar, description: input.description,
       templates: input.templates.map(({ question, answer }) => ({ question, answer })) };
     const detail = botId
       ? await this.socket.request<BotDetail>("bot.update", { botId, enabled: input.enabled, ...payload })
       : await this.socket.request<BotDetail>("bot.create", payload);
     if (generation === this.generation) {
       const bot: Bot = { id: detail.id, name: detail.name, ownerId: detail.ownerId, ownerUsername: detail.ownerUsername,
-        enabled: detail.enabled, createdAt: detail.createdAt };
+        avatar: detail.avatar, enabled: detail.enabled, createdAt: detail.createdAt };
       this.patch({ myBots: upsert(this.state.myBots, bot),
         bots: bot.enabled ? upsert(this.state.bots, bot) : this.state.bots.filter(item => item.id !== bot.id) });
     }

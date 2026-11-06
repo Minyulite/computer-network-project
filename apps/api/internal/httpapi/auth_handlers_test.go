@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -363,6 +364,31 @@ func TestEnglishNameSignsUpKeepsCaseAndLoginIgnoresIt(t *testing.T) {
 		response := authRequest(handler, "POST", "/auth/signup", testOrigin, fmt.Sprintf("198.51.100.%d", i+31), jsonCredentials(bad, testPassword), nil)
 		if response.Code != 400 {
 			t.Errorf("name %q: status=%d, want 400", bad, response.Code)
+		}
+	}
+}
+
+func TestSignupAvatarChoice(t *testing.T) {
+	handler, _, _ := authTestServer(t)
+	signup := func(n int, name, avatar string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"username": name, "password": testPassword, "avatar": avatar})
+		return authRequest(handler, "POST", "/auth/signup", testOrigin, fmt.Sprintf("198.51.100.%d", n+60), string(body), nil)
+	}
+	chosen := signup(1, "Chosen", "p05")
+	if chosen.Code != 201 || !strings.Contains(chosen.Body.String(), `"avatar":"p05"`) {
+		t.Fatalf("chosen avatar: %d %s", chosen.Code, chosen.Body.String())
+	}
+	me := authRequest(handler, "GET", "/auth/me", "", "198.51.100.61", "", sessionCookie(t, chosen))
+	if me.Code != 200 || !strings.Contains(me.Body.String(), `"avatar":"p05"`) {
+		t.Fatalf("session user lacks the avatar: %d %s", me.Code, me.Body.String())
+	}
+	assigned := signup(2, "Assigned", "")
+	if assigned.Code != 201 || !regexp.MustCompile(`"avatar":"p(0[1-9]|1[0-2])"`).MatchString(assigned.Body.String()) {
+		t.Fatalf("assigned avatar: %d %s", assigned.Code, assigned.Body.String())
+	}
+	for i, bad := range []string{"p13", "p00", "b01", "../p01", "x"} {
+		if response := signup(i+3, "Bad"+string(rune('A'+i)), bad); response.Code != 400 {
+			t.Errorf("avatar %q: status %d, want 400", bad, response.Code)
 		}
 	}
 }

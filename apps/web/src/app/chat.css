@@ -1,0 +1,190 @@
+/* Chat workspace: a dark rail, a light panel, lavender surfaces and one indigo accent.
+   The tokens were sampled from the reference design. Two differences, both for contrast:
+   the own-message fill is a little deeper than the sampled #7678e7 (white text on it
+   needs 4.5:1), and the composer placeholder is a touch darker. */
+.workspace {
+  --rail: #212023;
+  --rail-active: #464646;
+  --rail-text: #afaeb1;
+  --bg: #f9fbfc;
+  --surface: #ffffff;
+  --sunk: #eeeff9;
+  --raised: #dbddf9;
+  --paper: #eeeff9;
+  --text: #0a0a0f;
+  --text-2: #4a4c4e;
+  --muted: #636466;
+  --text-accent: #5c5499;
+  --text-sender: #201d48;
+  --placeholder: #656479;
+  --line: rgba(10, 10, 15, .08);
+  --line-strong: rgba(10, 10, 15, .14);
+  --accent: #6669de;
+  --accent-hover: #5a5dd0;
+  --accent-bright: #7678e7;
+  --accent-soft: #eeeff9;
+  --presence: #2f9a63;
+  --sans: var(--font-poppins), system-ui, "Noto Sans Thai", sans-serif;
+
+  display: grid; grid-template-columns: 76px minmax(0, 1fr); height: 100dvh;
+  background: var(--rail); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 20px;
+}
+.workspace :focus-visible { outline-color: var(--accent); }
+.workspace input, .workspace textarea { border-radius: 12px; }
+
+/* Rail */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 0; padding: 20px 8px; overflow-y: auto; }
+.rail :focus-visible { outline-color: #fff; }
+.rail-logo { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 16px; flex-shrink: 0; color: #fff; }
+.rail-logo .brand-mark { color: #fff; }
+.rail-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  width: 100%; height: auto; padding: 10px 2px; border: 0; border-radius: 16px; background: none;
+  color: var(--rail-text); font-size: 11px; line-height: 14px; font-weight: 400;
+}
+.rail-item:hover:not(:disabled) { background: rgba(255, 255, 255, .06); color: #fff; }
+.rail-item[aria-pressed="true"], .rail-item[aria-pressed="true"]:hover:not(:disabled) { background: var(--rail-active); color: #fff; }
+.rail-spacer { flex: 1; min-height: 12px; }
+.rail-divider { width: 32px; height: 1px; margin: 6px 0; flex-shrink: 0; background: rgba(255, 255, 255, .18); }
+.rail-account { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 6px 2px; color: var(--rail-text); font-size: 11px; line-height: 14px; }
+.rail-account span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Panel: the list and the chat share one rounded sheet */
+.panel { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-width: 0; min-height: 0; border-radius: 28px 0 0 28px; background: var(--bg); overflow: hidden; }
+
+/* List */
+.sidebar { display: flex; flex-direction: column; min-height: 0; padding-top: 20px; }
+.list-tools { display: flex; gap: 8px; padding: 0 16px 12px; }
+.search-label { position: relative; display: block; flex: 1; min-width: 0; color: var(--text); }
+.search-label .icon { position: absolute; left: 14px; top: 11px; pointer-events: none; }
+.search-label input { height: 40px; padding: 0 12px 0 40px; border: 0; border-radius: 14px; background: var(--raised); font-size: 14px; }
+.search-label input::placeholder { color: var(--text-2); }
+.icon-button { width: 40px; height: 40px; padding: 0; flex-shrink: 0; border: 0; border-radius: 14px; background: var(--sunk); color: var(--text-accent); }
+.icon-button.quiet { width: 36px; height: 36px; background: none; color: var(--text-2); }
+.icon-button.quiet:hover:not(:disabled) { background: var(--surface); }
+.sidebar-scroll { flex: 1; overflow-y: auto; padding: 0 8px 20px; }
+.sidebar h2 { display: flex; align-items: baseline; margin: 8px 12px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); }
+.empty-note { padding: 4px 12px; font-size: 13px; line-height: 20px; color: var(--muted); }
+.room-row {
+  --ring: var(--bg);
+  display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; height: auto; min-height: 60px;
+  padding: 8px 10px; margin-bottom: 2px; border: 0; border-radius: 16px; background: none; text-align: left;
+  font-size: 14px; font-weight: 400; color: var(--text); white-space: normal;
+}
+.room-row:hover:not(:disabled) { background: rgba(238, 239, 249, .6); }
+.room-row:disabled { opacity: 1; }
+.room-row.selected, .room-row.selected:hover:not(:disabled) { --ring: var(--sunk); background: var(--sunk); }
+.row-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.row-top { display: flex; align-items: baseline; gap: 8px; }
+.row-time { flex-shrink: 0; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row-title { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { overflow: hidden; font-size: 12px; line-height: 16px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.row-sub .you { color: var(--text-accent); }
+.count { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Chat */
+.chat-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.chat-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 20px 28px 12px; }
+.chat-title { min-width: 0; }
+.chat-title h1 { font-size: 22px; line-height: 28px; font-weight: 500; letter-spacing: 0; overflow-wrap: anywhere; }
+.subtitle { margin-top: 2px; font-size: 13px; line-height: 20px; color: var(--muted); }
+.header-actions { display: flex; align-items: center; gap: 16px; flex-shrink: 0; padding-top: 2px; }
+.with-icon { border-radius: 12px; }
+.connection { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 28px 8px; padding: 8px 14px; border-radius: 14px; background: #f6efdc; font-size: 13px; color: var(--text-2); }
+.notice.error { background: var(--danger-soft); color: var(--danger); }
+.notice button { height: 28px; padding: 0 10px; font-size: 12px; }
+
+.welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 280px; padding: 28px; text-align: center; }
+.welcome h2 { font-size: 24px; line-height: 32px; font-weight: 500; }
+.welcome p { max-width: 26rem; font-size: 14px; line-height: 22px; color: var(--muted); }
+.welcome .welcome-online { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
+.welcome .primary { margin-top: 12px; }
+
+.members { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-height: 104px; padding: 0 28px 10px; overflow-y: auto; font-size: 12px; color: var(--text-2); }
+.members strong { margin-right: 4px; font-weight: 500; color: var(--muted); }
+.members > span { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; background: var(--sunk); }
+.members .text-button { height: 24px; font-size: 12px; }
+
+.message-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 28px 16px; }
+.message { display: flex; align-items: flex-end; gap: 10px; align-self: flex-start; max-width: min(80%, 620px); }
+.message.own { align-self: flex-end; }
+.bubble { min-width: 0; padding: 10px 16px 8px; border-radius: 20px; background: var(--sunk); }
+.message.own .bubble { background: var(--accent); color: #fff; }
+.bubble .sender { display: block; margin-bottom: 2px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text-sender); }
+.bubble p { font-size: 14px; line-height: 22px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.message.own .bubble p { color: #fff; }
+.bubble time { display: block; margin-top: 2px; font-size: 11px; line-height: 14px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.message.own .bubble time { color: #fff; }
+.message.pending .bubble { opacity: .8; }
+.message.pending small { display: block; margin-top: 2px; font-size: 11px; line-height: 14px; text-align: right; color: #fff; }
+.message.pending .small { margin-top: 4px; color: #fff; }
+.message.pending button { margin-top: 8px; }
+.empty-conversation { display: grid; gap: 4px; margin: auto; text-align: center; color: var(--muted); }
+.empty-conversation p { font-size: 15px; font-weight: 500; color: var(--text); }
+.history-button { align-self: center; }
+.typing { margin: 0 4px; font-size: 12px; color: var(--muted); }
+
+/* Composer: the box is all there is under the messages */
+.composer { margin: 0 28px 20px; }
+.composer-box { display: flex; align-items: flex-end; gap: 4px; padding: 6px 6px 6px 18px; border-radius: 20px; background: var(--sunk); transition: box-shadow 150ms var(--ease); }
+.composer-box:focus-within { box-shadow: 0 0 0 2px var(--accent-bright); }
+.composer-box.over, .composer-box.over:focus-within { box-shadow: 0 0 0 2px var(--danger); }
+.composer-box textarea {
+  flex: 1; display: block; min-height: 36px; max-height: 180px; padding: 8px 0; border: 0; border-radius: 0; background: none;
+  font-size: 14px; line-height: 20px; resize: none; field-sizing: content;
+}
+.composer-box textarea::placeholder { color: var(--placeholder); }
+.composer-box textarea:focus-visible { border: 0; box-shadow: none; }
+.send { width: 36px; height: 36px; padding: 0; flex-shrink: 0; border-radius: 12px; }
+
+/* Dialog: creating a group */
+.dialog { width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 0; border-radius: 20px; background: var(--surface); color: var(--text); box-shadow: 0 16px 48px rgba(10, 10, 15, .18); overflow-y: auto; }
+.dialog::backdrop { background: rgba(10, 10, 15, .4); }
+.dialog h2 { margin-bottom: 16px; font-size: 18px; line-height: 24px; font-weight: 500; overflow-wrap: anywhere; }
+.dialog form { display: grid; gap: 16px; }
+.dialog label { font-size: 13px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Shop assistants inside the chat column */
+.bot-manager { padding: 4px 28px 28px; }
+.bot-list li, .bot-templates { border-radius: 16px; }
+.bot-list li { gap: 12px; justify-content: flex-start; }
+.bot-list .bot-name { flex: 1; min-width: 0; }
+.bot-actions { margin-left: auto; }
+
+@media (max-width: 1100px) {
+  .panel { grid-template-columns: 280px minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: 68px minmax(0, 1fr); }
+  .rail { padding: 16px 6px; }
+  .panel { grid-template-columns: 250px minmax(0, 1fr); border-radius: 24px 0 0 24px; }
+  .chat-header { padding: 16px 20px 10px; }
+  .members { padding: 0 20px 10px; }
+  .notice { margin: 0 20px 8px; }
+  .message-list { padding: 8px 20px 16px; }
+  .composer { margin: 0 20px 16px; }
+  .bot-manager { padding: 4px 20px 20px; }
+}
+@media (max-width: 700px) {
+  .workspace { display: flex; flex-direction: column; height: auto; min-height: 100dvh; }
+  .rail { flex-direction: row; justify-content: space-between; gap: 2px; padding: 6px 10px; overflow: visible; }
+  .rail-logo, .rail-spacer, .rail-divider, .rail-account { display: none; }
+  .rail-item { padding: 6px 2px; border-radius: 14px; }
+  .panel { display: flex; flex-direction: column; border-radius: 24px 24px 0 0; }
+  .sidebar { max-height: 50dvh; padding-top: 16px; }
+  .chat-column { height: 85dvh; min-height: 480px; }
+  .chat-header { padding: 16px 16px 8px; }
+  .chat-title h1 { font-size: 20px; line-height: 26px; }
+  .header-actions { gap: 8px; }
+  .members { padding-left: 16px; padding-right: 16px; }
+  .notice { margin: 0 16px 8px; }
+  .message-list { padding: 8px 16px 12px; }
+  .message { max-width: 92%; gap: 8px; }
+  .composer { margin: 0 12px 12px; }
+  .welcome h2 { font-size: 22px; line-height: 28px; }
+  .bot-manager { padding: 4px 16px 20px; }
+  .bot-manager-head { flex-direction: column-reverse; gap: 16px; }
+  .bot-list li { flex-wrap: wrap; }
+}

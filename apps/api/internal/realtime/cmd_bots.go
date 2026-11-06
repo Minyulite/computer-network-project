@@ -7,12 +7,14 @@ type botIDRequest struct {
 }
 type botCreateRequest struct {
 	Name        string                  `json:"name"`
+	Avatar      string                  `json:"avatar"`
 	Description string                  `json:"description"`
 	Templates   []chat.BotTemplateInput `json:"templates"`
 }
 type botUpdateRequest struct {
 	BotID       string                  `json:"botId"`
 	Name        string                  `json:"name"`
+	Avatar      string                  `json:"avatar"`
 	Description string                  `json:"description"`
 	Enabled     bool                    `json:"enabled"`
 	Templates   []chat.BotTemplateInput `json:"templates"`
@@ -32,12 +34,12 @@ func (h *Hub) botGet(r request, p botIDRequest) (any, error) {
 }
 
 func (h *Hub) botCreate(r request, p botCreateRequest) (any, error) {
-	detail, err := h.chat.CreateBot(r.ctx, r.identity, chat.BotInput{Name: p.Name, Description: p.Description, Enabled: true, Templates: p.Templates})
+	detail, err := h.chat.CreateBot(r.ctx, r.identity, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: true, Templates: p.Templates})
 	return h.botSaved(r, detail, err)
 }
 
 func (h *Hub) botUpdate(r request, p botUpdateRequest) (any, error) {
-	detail, err := h.chat.UpdateBot(r.ctx, r.identity, p.BotID, chat.BotInput{Name: p.Name, Description: p.Description, Enabled: p.Enabled, Templates: p.Templates})
+	detail, err := h.chat.UpdateBot(r.ctx, r.identity, p.BotID, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: p.Enabled, Templates: p.Templates})
 	return h.botSaved(r, detail, err)
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"example.com/computer-network/project/apps/api/internal/avatar"
 	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
@@ -25,6 +26,7 @@ const SessionCookieName = "chat_session"
 type User struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`
+	Avatar    string    `json:"avatar"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -99,12 +101,17 @@ func (s *Service) withHashSlot(ctx context.Context, work func() (bool, error)) (
 	}
 }
 
-func (s *Service) Signup(ctx context.Context, username, password, sourceIP, oldToken string) (Result, error) {
+// Signup creates an account. avatarID picks one of the cartoon pictures for people;
+// empty means the server chooses one.
+func (s *Service) Signup(ctx context.Context, username, password, avatarID, sourceIP, oldToken string) (Result, error) {
 	if !s.rates.allow("signup:ip:"+sourceIP, 5, time.Now()) {
 		return Result{}, ErrRateLimited
 	}
 	username = canonicalUsername(username)
-	if !validUsername(username) || !validPassword(password) {
+	if avatarID == "" {
+		avatarID = avatar.RandomPerson()
+	}
+	if !validUsername(username) || !validPassword(password) || !avatar.ValidPerson(avatarID) {
 		return Result{}, ErrInvalidInput
 	}
 	var encoded string
@@ -125,7 +132,7 @@ func (s *Service) Signup(ctx context.Context, username, password, sourceIP, oldT
 		return Result{}, err
 	}
 	record, revokedID, err := s.db.CreateAccountSession(ctx,
-		store.UserRecord{ID: userID, Username: username, PasswordHash: encoded}, newSession)
+		store.UserRecord{ID: userID, Username: username, Avatar: avatarID, PasswordHash: encoded}, newSession)
 	if err != nil {
 		return Result{}, err
 	}
@@ -215,7 +222,7 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 }
 
 func publicUser(record store.UserRecord) User {
-	return User{ID: record.ID, Username: record.Username, CreatedAt: record.CreatedAt}
+	return User{ID: record.ID, Username: record.Username, Avatar: record.Avatar, CreatedAt: record.CreatedAt}
 }
 
 func newSession(userID, oldToken string) (store.NewSession, string, error) {

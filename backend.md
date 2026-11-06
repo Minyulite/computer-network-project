@@ -357,14 +357,14 @@ Every command has `v: 1`, a `type`, a `requestId` of 1-64 ASCII letters, digits,
 | `message.send` | `{ "roomId", "clientMessageId", "text" }` | `{ "messageId", "roomId", "seq", "clientMessageId" }` |
 | `room.history` | `{ "roomId", "limit"?: 50, "beforeSeq"?, "afterSeq"?, "upToSeq"? }` | `{ "roomId", "messages": [message], "historyStartSeq", "upToSeq", "hasMore", "nextBeforeSeq"?, "nextAfterSeq"? }` |
 
-`room` has `id`, `kind`, `createdBy`, `latestSeq`, `historyStartSeq`, and `createdAt`; groups also have `name`, while direct rooms have `directUserLow` and `directUserHigh`. `group` has `id`, `name`, `createdBy`, and `createdAt`. A message has the fields shown in the `message.created` example above. The default catalogue page size is 20 (maximum 50); default history size is 50 (maximum 100). An omitted numeric limit or `0` selects the default.
+`room` has `id`, `kind`, `createdBy`, `latestSeq`, `historyStartSeq`, and `createdAt`; groups also have `name`, while direct rooms have `directUserLow` and `directUserHigh`. `group` has `id`, `name`, `createdBy`, `createdAt`, and `preview` (the first two members, for the overlapping pictures in a list). Every user object (`{ "id", "username", "avatar" }`) carries an `avatar` identifier: `p01` to `p12` for people and `b01` to `b08` for shop assistants, whose artwork lives in the web app's `public/avatars`. A direct `room` lists both people in `direct`, and a bot room has `botAvatar`. A message has the fields shown in the `message.created` example above. The default catalogue page size is 20 (maximum 50); default history size is 50 (maximum 100). An omitted numeric limit or `0` selects the default.
 
 | Event | Payload |
 | --- | --- |
 | `session.ready` | `{ "user": { "id", "username", "createdAt" }, "connectionId", "serverInstanceId" }` |
-| `presence.changed` | `{ "userId", "username", "online": boolean }` |
-| `group.created` | `{ "group": group, "initialMember": { "id", "username" } }` |
-| `group.member_joined` | `{ "roomId", "member": { "id", "username" } }` |
+| `presence.changed` | `{ "userId", "username", "avatar", "online": boolean }` |
+| `group.created` | `{ "group": group, "initialMember": { "id", "username", "avatar" } }` |
+| `group.member_joined` | `{ "roomId", "member": { "id", "username", "avatar" } }` |
 | `room.upserted` | `{ "room": room }` |
 | `message.created` | Message object shown above |
 
@@ -395,7 +395,7 @@ The online-user list provides recipients for the initial UI. Existing direct roo
 6. For sending/history, require membership. A user who only views the catalogue is not a member.
 7. Deliver a message to all currently connected devices of the members eligible to see that sequence.
 
-Messages before joining remain inaccessible. Membership survives disconnects and server restarts. There is no group owner capability to add another user in this phase.
+Messages before joining remain inaccessible. Membership survives disconnects and server restarts. There is no group owner capability to add another user in this phase: each person joins a group themselves.
 
 ### A complete send operation
 

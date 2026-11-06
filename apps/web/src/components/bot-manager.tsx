@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { Avatar, AvatarPicker } from "@/components/avatar";
 import { ArrowLeftIcon, PlusIcon } from "@/components/icons";
 import { errorText } from "@/lib/api";
+import { botAvatar, botAvatars, randomOf } from "@/lib/avatars";
 import type { ChatStore } from "@/lib/chat/store";
 import type { Bot, BotInput } from "@/lib/chat/types";
 
 const limits = { bots: 5, templates: 20, name: 64, description: 2000, question: 300, answer: 1000 };
-const emptyForm = (): BotInput => ({ name: "", description: "", enabled: true, templates: [] });
+const emptyForm = (avatar = botAvatars[0]): BotInput => ({ name: "", avatar, description: "", enabled: true, templates: [] });
 const count = (value: string) => Array.from(value.trim()).length;
 
 type Props = { store: ChatStore; bots: Bot[]; connected: boolean; onClose: () => void; onOpenBot: (id: string) => void };
@@ -23,11 +25,11 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
     setBusy(true); setError("");
     try {
       const detail = await store.getBot(id);
-      setForm({ name: detail.name, description: detail.description, enabled: detail.enabled, templates: detail.templates });
+      setForm({ name: detail.name, avatar: botAvatar(detail.avatar), description: detail.description, enabled: detail.enabled, templates: detail.templates });
       setEditing(id);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
-  function startNew() { setForm(emptyForm()); setEditing("new"); setError(""); }
+  function startNew() { setForm(emptyForm(randomOf(botAvatars))); setEditing("new"); setError(""); }
   function setTemplate(index: number, patch: Partial<BotInput["templates"][number]>) {
     setForm(value => ({ ...value, templates: value.templates.map((t, i) => i === index ? { ...t, ...patch } : t) }));
   }
@@ -44,7 +46,7 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
     setBusy(true); setError("");
     try {
       await store.saveBot(editing === "new" ? undefined : editing ?? undefined,
-        { name: form.name.trim(), description: form.description.trim(), enabled: form.enabled, templates });
+        { name: form.name.trim(), avatar: form.avatar, description: form.description.trim(), enabled: form.enabled, templates });
       setEditing(null);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
@@ -58,7 +60,8 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
     {editing === null ? <>
       {!bots.length && <p className="muted">You have no assistants yet. Create one to answer customer questions automatically.</p>}
       <ul className="bot-list">{bots.map(bot => <li key={bot.id}>
-        <span><strong>{bot.name}</strong><small className="bot-status">{bot.enabled && <i className="presence" />}{bot.enabled ? "Live" : "Turned off"}</small></span>
+        <Avatar id={botAvatar(bot.avatar)} bot />
+        <span className="bot-name"><strong>{bot.name}</strong><small className="bot-status">{bot.enabled && <i className="presence" />}{bot.enabled ? "Live" : "Turned off"}</small></span>
         <span className="bot-actions">
           <button type="button" disabled={!connected || busy || !bot.enabled} onClick={() => onOpenBot(bot.id)}>Try it</button>
           <button type="button" disabled={!connected || busy} onClick={() => void edit(bot.id)}>Edit</button>
@@ -66,6 +69,7 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
       <button type="button" className="primary" disabled={!connected || busy || bots.length >= limits.bots} onClick={startNew}>New assistant</button>
       {bots.length >= limits.bots && <p className="small muted">You can have up to {limits.bots} assistants.</p>}
     </> : <form className="bot-form" onSubmit={save}>
+      <AvatarPicker ids={botAvatars} name="bot-avatar" label="Avatar" value={form.avatar ?? botAvatars[0]} onChange={avatar => setForm({ ...form, avatar })} />
       <label>Name<input value={form.name} maxLength={limits.name} required onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Corner Café" /></label>
       <label>What is your shop about?
         <textarea rows={6} value={form.description} maxLength={limits.description} onChange={e => setForm({ ...form, description: e.target.value })}

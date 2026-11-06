@@ -81,7 +81,7 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	makeIdentity := func(name, ip string) auth.Identity {
-		result, err := authService.Signup(ctx, name, "fifteen characters", ip, "")
+		result, err := authService.Signup(ctx, name, "fifteen characters", "", ip, "")
 		if err != nil {
 			t.Fatal(err)
 		}
