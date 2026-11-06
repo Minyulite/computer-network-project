@@ -112,6 +112,10 @@ input:focus-visible, textarea:focus-visible { outline: 0; border-color: var(--ac
 .field { display: grid; gap: 6px; }
 .field-help { font-size: 12px; line-height: 16px; color: var(--muted); }
 .stack .primary { margin-top: 4px; }
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 44px; }
+.reveal { position: absolute; right: 4px; bottom: 4px; width: 32px; height: 32px; padding: 0; border: 0; background: none; color: var(--muted); }
+.reveal:hover:not(:disabled) { background: rgba(28, 35, 32, .05); color: var(--text); }
 .auth-switch { margin-top: 24px; font-size: 14px; color: var(--text-2); }
 .loading-shell { display: grid; gap: 16px; justify-items: start; max-width: 480px; margin: 15vh auto; padding: 32px; }
 .loading-shell h1 { font-family: var(--serif); font-size: 32px; line-height: 1.15; font-weight: 400; }

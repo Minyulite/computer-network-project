@@ -161,7 +161,7 @@ func TestAuthenticationFlow(t *testing.T) {
 	var signupBody struct {
 		User auth.User `json:"user"`
 	}
-	if err := json.Unmarshal(signup.Body.Bytes(), &signupBody); err != nil || signupBody.User.Username != "alice" || signupBody.User.ID == "" {
+	if err := json.Unmarshal(signup.Body.Bytes(), &signupBody); err != nil || signupBody.User.Username != "Alice" || signupBody.User.ID == "" {
 		t.Fatalf("signup user: %+v %v", signupBody, err)
 	}
 	me := authRequest(handler, "GET", "/auth/me", "", "192.0.2.1", "", aliceCookie)
@@ -333,5 +333,36 @@ func TestLoginRateLimit(t *testing.T) {
 	response := authRequest(handler, "POST", "/auth/login", testOrigin, "203.0.113.10", jsonCredentials("unknown", testPassword), nil)
 	if response.Code != 429 {
 		t.Fatalf("rate limit status=%d", response.Code)
+	}
+}
+
+func TestEnglishNameSignsUpKeepsCaseAndLoginIgnoresIt(t *testing.T) {
+	handler, _, _ := authTestServer(t)
+	for i, name := range []string{"Mark", "Nat Silp", "m@rk_99"} {
+		signup := authRequest(handler, "POST", "/auth/signup", testOrigin, fmt.Sprintf("198.51.100.%d", i+1), jsonCredentials(name, testPassword), nil)
+		if signup.Code != 201 {
+			t.Fatalf("%q: signup status=%d body=%s", name, signup.Code, signup.Body.String())
+		}
+		var created struct {
+			User auth.User `json:"user"`
+		}
+		if err := json.Unmarshal(signup.Body.Bytes(), &created); err != nil || created.User.Username != name {
+			t.Fatalf("name was not kept as typed: %+v %v", created, err)
+		}
+		// The same name in another case is taken, and signing in works in any case.
+		duplicate := authRequest(handler, "POST", "/auth/signup", testOrigin, fmt.Sprintf("198.51.100.%d", i+11), jsonCredentials(strings.ToUpper(name), testPassword), nil)
+		if duplicate.Code != 409 {
+			t.Fatalf("%q: duplicate in another case status=%d", name, duplicate.Code)
+		}
+		login := authRequest(handler, "POST", "/auth/login", testOrigin, fmt.Sprintf("198.51.100.%d", i+21), jsonCredentials(strings.ToLower(name), testPassword), nil)
+		if login.Code != 200 || !strings.Contains(login.Body.String(), name) {
+			t.Fatalf("%q: login status=%d body=%s", name, login.Code, login.Body.String())
+		}
+	}
+	for i, bad := range []string{"", "   ", "ab", strings.Repeat("x", 25), "12345", "นัทศิลป์", "Mark😀", "a" + string(rune(0x200b)) + "bc"} {
+		response := authRequest(handler, "POST", "/auth/signup", testOrigin, fmt.Sprintf("198.51.100.%d", i+31), jsonCredentials(bad, testPassword), nil)
+		if response.Code != 400 {
+			t.Errorf("name %q: status=%d, want 400", bad, response.Code)
+		}
 	}
 }

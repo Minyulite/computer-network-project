@@ -119,7 +119,7 @@ cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai
 
 ### 3.5 Auth (`internal/auth`)
 - Password: Argon2id (`password.go`); มี `hashSlots`/`workSlots` จำกัดงาน hash พร้อมกัน และ `dummyHash` กัน timing leak ตอนไม่มี user
-- Username: `^[a-z0-9_]{3,24}$` (canonical = lower-case)
+- Username: ASCII ที่พิมพ์ได้ 3–24 ตัว มีตัวอักษรอย่างน้อย 1 ตัว (ตัวเลขและสัญลักษณ์ใส่หรือไม่ใส่ก็ได้ เช่น `Mark`, `Mark99`) ; เก็บและแสดงตามที่พิมพ์ แต่ **ซ้ำไม่ได้โดยไม่สนตัวพิมพ์** (unique index บน `lower(username)`) และ sign in ก็ไม่สนตัวพิมพ์ ; กฎอยู่ที่ `auth/username.go`, constraint `users_username_format` ใน `003_english_username.sql`, และ `auth-form.tsx`
 - Session: token สุ่ม → เก็บ **SHA-256 digest** ใน DB; cookie `chat_session` (HttpOnly, host-only; `Secure` ตาม `COOKIE_SECURE`); อายุ 7 วัน; token ไม่เคยอยู่ใน JSON
 - Login/Signup รับ `oldToken` เพื่อ revoke session เดิมของ browser นี้ (สลับบัญชี)
 - `RevocationNotifier` (interface) — `realtime.Hub` implement `SessionRevoked` ; logout **รอ** ให้ hub ปิด socket ของ session นั้นก่อนตอบสำเร็จ

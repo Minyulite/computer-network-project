@@ -125,7 +125,7 @@ Use `uuid` for IDs and their foreign keys, `timestamptz` for timestamps, `bigint
 | `password_hash` | Encoded Argon2id parameters, salt, and hash |
 | `created_at` | Server creation time |
 
-Proposed username rule: trim surrounding whitespace, convert to lowercase, then require 3-24 ASCII letters, digits, or underscores. `Alice` and `alice` therefore refer to the same username. Keep usernames immutable in this phase.
+Username rule: trim surrounding whitespace and collapse inner runs to one space, then require 3-24 printable ASCII characters with at least one letter, so `Mark`, `Mark99` and `m@rk_lee` are valid. The name is stored and shown as typed, but uniqueness and sign-in ignore case: `Alice` and `alice` are the same username, and the second signup is refused with 409. Non-ASCII characters are refused, which also rules out invisible and look-alike characters. Keep usernames immutable in this phase.
 
 ### `sessions`
 
@@ -206,7 +206,7 @@ PostgreSQL's [locking documentation](https://www.postgresql.org/docs/18/explicit
 
 ### Registration and login
 
-Signup accepts `username` and `password`. The proposed password policy is 15-128 Unicode code points, with a 512-byte upper bound. Preserve password whitespace; do not silently trim it. Email is not required.
+Signup accepts `username` and `password`. The proposed password policy is 8-128 Unicode code points, with a 512-byte upper bound. Preserve password whitespace; do not silently trim it. Email is not required.
 
 Hash passwords with Argon2id, a fresh random 16-byte salt, and a 32-byte output. Start with 19 MiB memory, two iterations, and one lane, then benchmark on the demonstration machine. These parameters follow the [OWASP password-storage recommendation](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Store parameters alongside the hash, verify in constant time, and bound concurrent hashing work.
 

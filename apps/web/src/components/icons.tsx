@@ -12,6 +12,16 @@ export const SearchIcon = () => <Icon><circle cx="11" cy="11" r="8" /><path d="m
 export const PlusIcon = () => <Icon><path d="M5 12h14" /><path d="M12 5v14" /></Icon>;
 export const CheckIcon = () => <Icon><path d="M20 6 9 17l-5-5" /></Icon>;
 export const ArrowLeftIcon = () => <Icon><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></Icon>;
+export const EyeIcon = () => <Icon>
+  <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+  <circle cx="12" cy="12" r="3" />
+</Icon>;
+export const EyeOffIcon = () => <Icon>
+  <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
+  <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+  <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
+  <path d="m2 2 20 20" />
+</Icon>;
 export const SpellCheckIcon = () => <Icon><path d="m6 16 6-12 6 12" /><path d="M8 12h8" /><path d="m16 20 2 2 4-4" /></Icon>;
 export const StoreIcon = () => <Icon>
   <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7" />

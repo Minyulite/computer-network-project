@@ -33,7 +33,7 @@ func (db *DB) UserByUsername(parent context.Context, username string) (UserRecor
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var user UserRecord
-	err := db.Pool.QueryRow(ctx, `SELECT id, username, password_hash, created_at FROM users WHERE username = $1 AND NOT is_bot`, username).
+	err := db.Pool.QueryRow(ctx, `SELECT id, username, password_hash, created_at FROM users WHERE lower(username) = lower($1) AND NOT is_bot`, username).
 		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UserRecord{}, ErrNotFound
@@ -153,7 +153,8 @@ func (db *DB) RevokeSession(parent context.Context, digest []byte) (string, erro
 
 func mapUserWriteError(err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_username_key" {
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		(pgErr.ConstraintName == "users_username_key" || pgErr.ConstraintName == "users_username_lower_key") {
 		return ErrUsernameTaken
 	}
 	return err

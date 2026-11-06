@@ -57,7 +57,7 @@ Use PostgreSQL SQL, UUID IDs, `timestamptz` timestamps, `bigint` sequences, and 
 
 | Table | Required fields and constraints |
 | --- | --- |
-| `users` | `id`, unique canonical `username`, `password_hash`, `created_at`. Username must match lowercase ASCII `[a-z0-9_]{3,24}`. |
+| `users` | `id`, unique canonical `username`, `password_hash`, `created_at`. Username is 3-24 printable ASCII characters with at least one letter, kept as typed; uniqueness ignores case (`users_username_lower_key`). |
 | `sessions` | `id`, `user_id` FK, unique 32-byte `token_hash`, `created_at`, `expires_at`, nullable `revoked_at`. Expiry is later than creation. Index user and expiry. |
 | `rooms` | `id`, `kind`, nullable group `name`, `created_by` FK, `direct_user_low`/`direct_user_high` user FKs, generated nullable `direct_key`, `last_seq`, `created_at`. |
 | `room_members` | Primary key `(room_id, user_id)`, both FKs, `joined_at`, `joined_seq`. Index `(user_id, room_id)`. |
@@ -94,7 +94,7 @@ Implement `internal/auth`, account/session store methods, and HTTP handlers:
 | `GET /auth/me` | Return `{user, expiresAt}` or `401`. |
 | `POST /auth/logout` | Revoke current session; clear cookie; idempotent `204`. |
 
-Passwords: 15-128 code points, at most 512 UTF-8 bytes, no silent whitespace trimming. Use salted Argon2id per `backend.md`. Session tokens are 32 random bytes; store only their SHA-256 digest. Use host-only HttpOnly cookies, SameSite=Lax, seven-day fixed expiry, and Secure in HTTPS mode. Cookie tokens are not JSON response fields or local-storage values.
+Passwords: 8-128 code points, at most 512 UTF-8 bytes, no silent whitespace trimming. Use salted Argon2id per `backend.md`. Session tokens are 32 random bytes; store only their SHA-256 digest. Use host-only HttpOnly cookies, SameSite=Lax, seven-day fixed expiry, and Secure in HTTPS mode. Cookie tokens are not JSON response fields or local-storage values.
 
 Add exact Origin validation for browser mutation routes, credentialed CORS, body limits, generic errors, and bounded login/signup/hash workloads. Use the same hostname for frontend HTTP and backend HTTP/WS URLs. Normal tabs share their browser session; distinct devices typically have different sessions.
 

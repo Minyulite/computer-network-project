@@ -41,7 +41,8 @@ function roomName(room: Room, state: ChatState, user: User) {
   return state.known[other ?? ""]?.username ?? `Private chat · ${other?.slice(0, 8)}`;
 }
 
-const initials = (name: string) => name.slice(0, 2).toUpperCase();
+// By code point, so an emoji or a Thai letter with its vowel mark is never cut in half.
+const initials = (name: string) => Array.from(name).slice(0, 2).join("").toUpperCase();
 const formatTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function ChatWorkspace({ user }: { user: User }) {

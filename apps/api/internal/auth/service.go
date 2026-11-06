@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +18,6 @@ var ErrInvalidInput = errors.New("invalid input")
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrUnauthenticated = errors.New("unauthenticated")
 var ErrRateLimited = errors.New("rate limited")
-
-var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,24}$`)
 
 const sessionLifetime = 7 * 24 * time.Hour
 const SessionCookieName = "chat_session"
@@ -102,16 +99,12 @@ func (s *Service) withHashSlot(ctx context.Context, work func() (bool, error)) (
 	}
 }
 
-func canonicalUsername(username string) string {
-	return strings.ToLower(strings.TrimSpace(username))
-}
-
 func (s *Service) Signup(ctx context.Context, username, password, sourceIP, oldToken string) (Result, error) {
 	if !s.rates.allow("signup:ip:"+sourceIP, 5, time.Now()) {
 		return Result{}, ErrRateLimited
 	}
 	username = canonicalUsername(username)
-	if !usernamePattern.MatchString(username) || !validPassword(password) {
+	if !validUsername(username) || !validPassword(password) {
 		return Result{}, ErrInvalidInput
 	}
 	var encoded string
@@ -148,7 +141,7 @@ func (s *Service) Login(ctx context.Context, username, password, sourceIP, oldTo
 	if !s.rates.allow("login:ip:"+sourceIP, 10, now) {
 		return Result{}, ErrRateLimited
 	}
-	if usernamePattern.MatchString(username) && !s.rates.allow("login:name:"+username, 10, now) {
+	if validUsername(username) && !s.rates.allow("login:name:"+strings.ToLower(username), 10, now) {
 		return Result{}, ErrRateLimited
 	}
 	if !validPassword(password) {
