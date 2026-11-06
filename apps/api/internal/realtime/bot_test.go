@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"example.com/computer-network/project/apps/api/internal/botai"
+	"example.com/computer-network/project/apps/api/internal/ai/botai"
+	"example.com/computer-network/project/apps/api/internal/ai/grammar"
+	"example.com/computer-network/project/apps/api/internal/ai/llm"
 	"example.com/computer-network/project/apps/api/internal/chat"
-	"example.com/computer-network/project/apps/api/internal/grammar"
-	"example.com/computer-network/project/apps/api/internal/llm"
 )
 
 // scriptedLLM answers every classification with the template match and can be held back.
@@ -29,7 +29,7 @@ func (s scriptedLLM) Generate(ctx context.Context, req llm.Request) (string, err
 
 func botRig(t *testing.T, generator botai.Generator) *testRig {
 	t.Helper()
-	return newRigFull(t, grammar.New(grammar.Config{}), func(c *chat.Service) BotReplier { return botai.New(generator, c) })
+	return newRigFull(t, grammar.New(llm.New(llm.Config{})), func(c *chat.Service) BotReplier { return botai.New(generator, c) })
 }
 
 func TestBotConversationIsPrivateAndReplied(t *testing.T) {

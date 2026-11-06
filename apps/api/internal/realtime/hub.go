@@ -2,8 +2,6 @@ package realtime
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"sort"
 	"sync"
@@ -11,15 +9,46 @@ import (
 
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"github.com/coder/websocket"
 )
 
 var errClosed = errors.New("realtime hub closed")
 var errCapacity = errors.New("connection limit reached")
 
+const (
+	maxConnections        = 200
+	maxConnectionsPerUser = 10
+	sessionCheckTimeout   = 3 * time.Second
+)
+
+// Authenticator is the part of auth.Service the hub uses.
+type Authenticator interface {
+	ValidateSession(ctx context.Context, token string) (auth.Identity, error)
+	ValidateSessionID(ctx context.Context, sessionID string) (auth.Identity, error)
+}
+
+// ChatService is the part of chat.Service the hub's commands use.
+type ChatService interface {
+	OwnRooms(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Room], error)
+	Groups(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Group], error)
+	GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options chat.PageOptions) (chat.Page[chat.GroupMember], error)
+	OpenDirect(ctx context.Context, caller auth.Identity, otherUserID string) (chat.Room, bool, error)
+	CreateGroup(ctx context.Context, caller auth.Identity, name string) (chat.Room, error)
+	JoinGroup(ctx context.Context, caller auth.Identity, roomID string) (chat.JoinResult, error)
+	SendMessage(ctx context.Context, caller auth.Identity, roomID, clientMessageID, text string) (chat.SendResult, error)
+	History(ctx context.Context, caller auth.Identity, roomID string, options chat.HistoryOptions) (chat.HistoryPage, error)
+	BotCatalog(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Bot], error)
+	MyBots(ctx context.Context, caller auth.Identity) ([]chat.Bot, error)
+	GetBot(ctx context.Context, caller auth.Identity, botID string) (chat.BotDetail, error)
+	CreateBot(ctx context.Context, caller auth.Identity, input chat.BotInput) (chat.BotDetail, error)
+	UpdateBot(ctx context.Context, caller auth.Identity, botID string, input chat.BotInput) (chat.BotDetail, error)
+	OpenBot(ctx context.Context, caller auth.Identity, botID string) (chat.Room, bool, error)
+}
+
 type Hub struct {
-	auth           *auth.Service
-	chat           *chat.Service
+	auth           Authenticator
+	chat           ChatService
 	grammar        GrammarCorrector
 	bots           BotReplier // Optional; nil disables bot replies.
 	allowedOrigins map[string]bool
@@ -55,28 +84,17 @@ type command struct {
 	envelope envelope
 }
 
-func New(authService *auth.Service, chatService *chat.Service, grammarService GrammarCorrector, botReplier BotReplier, origins []string) *Hub {
+func New(authService Authenticator, chatService ChatService, grammarService GrammarCorrector, botReplier BotReplier, origins []string) *Hub {
 	allowed := make(map[string]bool, len(origins))
 	for _, origin := range origins {
 		allowed[origin] = true
 	}
-	h := &Hub{auth: authService, chat: chatService, grammar: grammarService, bots: botReplier, allowedOrigins: allowed, instanceID: uuid(),
+	h := &Hub{auth: authService, chat: chatService, grammar: grammarService, bots: botReplier, allowedOrigins: allowed, instanceID: id.MustNew(),
 		control: make(chan any, 256), commands: make(chan command, 256), finished: make(chan struct{}),
 		connections: map[string]*client{}, byUser: map[string]map[string]*client{},
 		bySession: map[string]map[string]*client{}, rates: map[string]*userRates{}, grammarInflight: map[string]int{}, botInflight: map[string]int{}}
 	go h.run()
 	return h
-}
-
-func uuid() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(err)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	raw := hex.EncodeToString(b[:])
-	return raw[:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:]
 }
 
 func (h *Hub) sendControl(value any) error {
@@ -133,6 +151,8 @@ func (h *Hub) Shutdown(ctx context.Context) error {
 	}
 }
 
+// run owns all hub state. Control messages take priority over commands so
+// disconnects and revocations are never stuck behind a queue of requests.
 func (h *Hub) run() {
 	defer close(h.finished)
 	for {
@@ -157,35 +177,7 @@ func (h *Hub) run() {
 func (h *Hub) handleControl(value any) bool {
 	switch v := value.(type) {
 	case register:
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		identity, err := h.auth.ValidateSessionID(ctx, v.client.identity.SessionID)
-		cancel()
-		if err == nil && identity.User.ID != v.client.identity.User.ID {
-			err = auth.ErrUnauthenticated
-		}
-		if err == nil && (len(h.connections) >= 200 || len(h.byUser[identity.User.ID]) >= 10) {
-			err = errCapacity
-		}
-		if err == nil {
-			c := v.client
-			c.identity = identity
-			first := len(h.byUser[identity.User.ID]) == 0
-			h.connections[c.id] = c
-			if h.byUser[identity.User.ID] == nil {
-				h.byUser[identity.User.ID] = map[string]*client{}
-			}
-			if h.bySession[identity.SessionID] == nil {
-				h.bySession[identity.SessionID] = map[string]*client{}
-			}
-			h.byUser[identity.User.ID][c.id] = c
-			h.bySession[identity.SessionID][c.id] = c
-			h.clients.Add(1)
-			h.enqueue(c, wire("session.ready", "", map[string]any{"user": identity.User, "connectionId": c.id, "serverInstanceId": h.instanceID}))
-			if first {
-				h.broadcastAll("presence.changed", map[string]any{"userId": identity.User.ID, "username": identity.User.Username, "online": true})
-			}
-		}
-		v.reply <- err
+		v.reply <- h.addClient(v.client)
 	case remove:
 		h.removeClient(v.client, websocket.StatusNormalClosure, "Connection closed")
 	case revoke:
@@ -207,6 +199,38 @@ func (h *Hub) handleControl(value any) bool {
 	return false
 }
 
+func (h *Hub) addClient(c *client) error {
+	ctx, cancel := context.WithTimeout(context.Background(), sessionCheckTimeout)
+	identity, err := h.auth.ValidateSessionID(ctx, c.identity.SessionID)
+	cancel()
+	if err == nil && identity.User.ID != c.identity.User.ID {
+		err = auth.ErrUnauthenticated
+	}
+	if err == nil && (len(h.connections) >= maxConnections || len(h.byUser[identity.User.ID]) >= maxConnectionsPerUser) {
+		err = errCapacity
+	}
+	if err != nil {
+		return err
+	}
+	c.identity = identity
+	first := len(h.byUser[identity.User.ID]) == 0
+	h.connections[c.id] = c
+	if h.byUser[identity.User.ID] == nil {
+		h.byUser[identity.User.ID] = map[string]*client{}
+	}
+	if h.bySession[identity.SessionID] == nil {
+		h.bySession[identity.SessionID] = map[string]*client{}
+	}
+	h.byUser[identity.User.ID][c.id] = c
+	h.bySession[identity.SessionID][c.id] = c
+	h.clients.Add(1)
+	h.enqueue(c, wire(eventSessionReady, "", map[string]any{"user": identity.User, "connectionId": c.id, "serverInstanceId": h.instanceID}))
+	if first {
+		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": identity.User.ID, "username": identity.User.Username, "online": true})
+	}
+	return nil
+}
+
 func (h *Hub) removeClient(c *client, code websocket.StatusCode, reason string) {
 	if h.connections[c.id] == nil {
 		return
@@ -224,7 +248,7 @@ func (h *Hub) removeClient(c *client, code websocket.StatusCode, reason string) 
 	}
 	c.close(code, reason)
 	if last {
-		h.broadcastAll("presence.changed", map[string]any{"userId": c.identity.User.ID, "username": c.identity.User.Username, "online": false})
+		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": c.identity.User.ID, "username": c.identity.User.Username, "online": false})
 	}
 }
 
@@ -248,8 +272,8 @@ func (h *Hub) broadcastAll(typ string, payload any) {
 
 func (h *Hub) broadcastUsers(ids []string, typ string, payload any) {
 	frame := wire(typ, "", payload)
-	for _, id := range ids {
-		for _, c := range h.byUser[id] {
+	for _, userID := range ids {
+		for _, c := range h.byUser[userID] {
 			h.enqueue(c, frame)
 		}
 	}
@@ -264,23 +288,23 @@ func (h *Hub) onlinePage(limit int, cursor string) (chat.Page[onlineUser], error
 	if limit < 0 || limit > 50 {
 		return chat.Page[onlineUser]{}, chat.ErrInvalidInput
 	}
-	if cursor != "" && !cursorPattern.MatchString(cursor) {
+	if cursor != "" && !id.Valid(cursor) {
 		return chat.Page[onlineUser]{}, chat.ErrInvalidInput
 	}
 	if limit == 0 {
 		limit = 20
 	}
 	ids := make([]string, 0, len(h.byUser))
-	for id := range h.byUser {
-		if id > cursor {
-			ids = append(ids, id)
+	for userID := range h.byUser {
+		if userID > cursor {
+			ids = append(ids, userID)
 		}
 	}
 	sort.Strings(ids)
 	page := chat.Page[onlineUser]{Items: make([]onlineUser, 0, min(limit, len(ids)))}
-	for _, id := range ids[:min(limit, len(ids))] {
-		for _, c := range h.byUser[id] {
-			page.Items = append(page.Items, onlineUser{id, c.identity.User.Username})
+	for _, userID := range ids[:min(limit, len(ids))] {
+		for _, c := range h.byUser[userID] {
+			page.Items = append(page.Items, onlineUser{userID, c.identity.User.Username})
 			break
 		}
 	}
@@ -288,28 +312,4 @@ func (h *Hub) onlinePage(limit int, cursor string) (chat.Page[onlineUser], error
 		page.NextCursor = ids[limit-1]
 	}
 	return page, nil
-}
-
-type bucket struct {
-	tokens float64
-	last   time.Time
-}
-
-func (b *bucket) allow(now time.Time, rate, burst float64) bool {
-	if b.last.IsZero() {
-		b.tokens = burst
-	}
-	b.tokens = min(burst, b.tokens+now.Sub(b.last).Seconds()*rate)
-	b.last = now
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-
-type userRates struct {
-	all     bucket
-	sends   bucket
-	grammar bucket
 }

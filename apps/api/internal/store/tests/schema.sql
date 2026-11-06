@@ -5,6 +5,7 @@ BEGIN;
 CREATE SCHEMA t1_schema_acceptance;
 SET LOCAL search_path TO t1_schema_acceptance, public;
 \ir ../migrations/001_initial.sql
+\ir ../migrations/003_english_username.sql
 
 CREATE FUNCTION pg_temp.require(ok boolean, label text) RETURNS void
 LANGUAGE plpgsql AS $$
@@ -41,19 +42,40 @@ INSERT INTO users (id, username, password_hash) VALUES
     ('00000000-0000-0000-0000-000000000002', 'bob_2', 'argon2id-fixture'),
     ('00000000-0000-0000-0000-000000000003', 'charlie', 'argon2id-fixture');
 INSERT INTO users (id, username, password_hash) VALUES
-    ('00000000-0000-0000-0000-000000000005', repeat('a', 24), 'argon2id-fixture');
+    ('00000000-0000-0000-0000-000000000005', repeat('a', 24), 'argon2id-fixture'),
+    ('00000000-0000-0000-0000-000000000006', 'Mark', 'argon2id-fixture'),
+    ('00000000-0000-0000-0000-000000000007', 'abc', 'argon2id-fixture'),
+    ('00000000-0000-0000-0000-000000000008', 'm@rk_99 Lee!', 'argon2id-fixture');
 
 SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
     ('00000000-0000-0000-0000-000000000004', 'alice', 'hash')$sql$,
     '23505', 'users_username_key');
 SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
     ('00000000-0000-0000-0000-000000000004', 'Alice', 'hash')$sql$,
-    '23514', 'users_username_format');
+    '23505', 'users_username_lower_key');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', 'MARK', 'hash')$sql$,
+    '23505', 'users_username_lower_key');
 SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
     ('00000000-0000-0000-0000-000000000004', 'ab', 'hash')$sql$,
     '23514', 'users_username_format');
 SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
     ('00000000-0000-0000-0000-000000000004', repeat('a', 25), 'hash')$sql$,
+    '23514', 'users_username_format');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', '', 'hash')$sql$,
+    '23514', 'users_username_format');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', ' padded', 'hash')$sql$,
+    '23514', 'users_username_format');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', 'tab' || chr(9) || 'x', 'hash')$sql$,
+    '23514', 'users_username_format');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', 'นัทศิลป์', 'hash')$sql$,
+    '23514', 'users_username_format');
+SELECT pg_temp.expect_error($sql$INSERT INTO users (id, username, password_hash) VALUES
+    ('00000000-0000-0000-0000-000000000004', 'caf' || chr(233), 'hash')$sql$,
     '23514', 'users_username_format');
 
 INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES

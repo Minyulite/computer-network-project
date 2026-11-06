@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"example.com/computer-network/project/apps/api/internal/ai/grammar"
 	"example.com/computer-network/project/apps/api/internal/auth"
-	"example.com/computer-network/project/apps/api/internal/grammar"
 )
 
 // blockingCorrector holds every call open so tests control when "the AI" answers.

@@ -17,12 +17,18 @@ const passwordLanes = 1
 
 var errInvalidHash = errors.New("invalid password hash")
 
+const (
+	minPasswordRunes = 8
+	maxPasswordRunes = 128
+	maxPasswordBytes = 512
+)
+
 func validPassword(password string) bool {
-	if !utf8.ValidString(password) || len(password) > 512 {
+	if !utf8.ValidString(password) || len(password) > maxPasswordBytes {
 		return false
 	}
 	count := utf8.RuneCountInString(password)
-	return count >= 15 && count <= 128
+	return count >= minPasswordRunes && count <= maxPasswordRunes
 }
 
 func hashPassword(password string) (string, error) {

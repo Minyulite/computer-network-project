@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"example.com/computer-network/project/apps/api/internal/auth"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -97,11 +98,11 @@ func setup(t *testing.T) fixture {
 
 func mustUUID(t *testing.T) string {
 	t.Helper()
-	id, err := newUUID()
+	value, err := id.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return id
+	return value
 }
 
 func containsID(ids []string, id string) bool {
@@ -330,12 +331,12 @@ func TestRetriesPaginationAndRollback(t *testing.T) {
 			if i%2 == 1 {
 				caller = f.b
 			}
-			id, err := newUUID()
+			clientMessageID, err := id.New()
 			if err != nil {
 				results <- sentResult{err: err}
 				return
 			}
-			result, err := f.chat.SendMessage(ctx, caller, direct.ID, id, fmt.Sprintf("msg-%d", i))
+			result, err := f.chat.SendMessage(ctx, caller, direct.ID, clientMessageID, fmt.Sprintf("msg-%d", i))
 			results <- sentResult{result, err}
 		}(i)
 	}

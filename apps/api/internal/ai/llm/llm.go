@@ -17,8 +17,8 @@ import (
 
 const (
 	defaultBaseURL  = "https://generativelanguage.googleapis.com/v1beta"
-	totalTimeout    = 30 * time.Second
-	attemptTimeout  = 12 * time.Second
+	defaultTimeout  = 30 * time.Second
+	attemptTimeout  = 12 * time.Second // Flaky networks often stall the TLS handshake.
 	maxAttempts     = 3
 	retryDelay      = 500 * time.Millisecond
 	maxResponseSize = 1 << 20
@@ -44,6 +44,8 @@ type Request struct {
 	Prompt     string
 	JSONSchema map[string]any
 	MaxTokens  int
+	// Timeout caps all attempts together; zero means the default of 30 seconds.
+	Timeout time.Duration
 }
 
 type Client struct {
@@ -66,7 +68,11 @@ func (c *Client) Generate(ctx context.Context, req Request) (string, error) {
 	if !c.Configured() {
 		return "", ErrNotConfigured
 	}
-	callCtx, cancel := context.WithTimeout(ctx, totalTimeout)
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {

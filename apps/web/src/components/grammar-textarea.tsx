@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { CheckIcon, SpellCheckIcon } from "@/components/icons";
 import { errorText } from "@/lib/api";
 import { wordDiff } from "@/lib/word-diff";
 
@@ -143,15 +144,15 @@ export function GrammarTextarea({ id, value, onChange, correct, canCorrect, onCo
     {panel && <div ref={panelRef} className={panel.kind === "menu" ? "grammar-menu" : "grammar-panel"} role="dialog" aria-label="Grammar correction">
       {panel.kind === "menu" && <button type="button" className="grammar-item" disabled={!canCorrect}
         title={canCorrect ? "Sends the selection and nearby draft text to Google Gemini" : "Connection unavailable"}
-        onClick={() => void runCorrection(panel)}><span aria-hidden>✨</span> Correct grammar</button>}
-      {panel.kind === "loading" && <div className="grammar-status" role="status"><span className="grammar-spinner" aria-hidden /> Checking grammar with Gemini…</div>}
-      {panel.kind === "nochange" && <div className="grammar-status ok" role="status">✓ No issues found</div>}
+        onClick={() => void runCorrection(panel)}><SpellCheckIcon />Correct grammar</button>}
+      {panel.kind === "loading" && <div className="grammar-status" role="status"><span className="grammar-spinner" aria-hidden />Checking grammar with Gemini…</div>}
+      {panel.kind === "nochange" && <div className="grammar-status ok" role="status"><CheckIcon />No issues found</div>}
       {panel.kind === "error" && <>
         <div className="grammar-status error" role="alert">{panel.message}</div>
         <div className="grammar-actions"><button type="button" onClick={close}>Close</button></div>
       </>}
       {panel.kind === "preview" && <>
-        <p className="eyebrow">SUGGESTED CORRECTION</p>
+        <p className="grammar-label">Suggested correction</p>
         <div className="grammar-diff">{wordDiff(panel.text, panel.corrected).map((part, index) => <span key={index} className={`diff-${part.type}`}>{part.text}</span>)}</div>
         <div className="grammar-actions">
           <button type="button" onClick={close}>Cancel</button>

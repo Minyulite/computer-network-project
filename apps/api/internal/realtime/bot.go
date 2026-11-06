@@ -61,6 +61,6 @@ func (h *Hub) finishBot(done botDone) {
 		return
 	}
 	if done.result.Created {
-		h.broadcastUsers(done.result.RecipientUserIDs, "message.created", done.result.Message)
+		h.broadcastUsers(done.result.RecipientUserIDs, eventMessageCreated, done.result.Message)
 	}
 }

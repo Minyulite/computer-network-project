@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"example.com/computer-network/project/apps/api/internal/config"
 	"example.com/computer-network/project/apps/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,7 +20,7 @@ func TestHealthUnavailable(t *testing.T) {
 	}
 	defer pool.Close()
 	recorder := httptest.NewRecorder()
-	NewHandler(&store.DB{Pool: pool}, nil, config.Config{}).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	NewHandler(Deps{DB: &store.DB{Pool: pool}}).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.String() != "{\"status\":\"unavailable\"}\n" {
 		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
 	}

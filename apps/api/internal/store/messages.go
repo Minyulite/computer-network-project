@@ -70,7 +70,9 @@ func (db *DB) SaveMessage(parent context.Context, message MessageRecord) (Messag
 		message.RoomID, message.SenderID).Scan(&member); err != nil {
 		return MessageRecord{}, false, err
 	}
-	if !member { return MessageRecord{}, false, ErrNotFound }
+	if !member {
+		return MessageRecord{}, false, ErrNotFound
+	}
 	prior, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageColumns+`
 		FROM messages m WHERE m.sender_id = $1 AND m.client_message_id = $2`, message.SenderID, message.ClientMessageID))
 	if err == nil {
@@ -148,7 +150,7 @@ func (db *DB) History(parent context.Context, roomID, userID string, limit int,
 		history.UpToSeq = *requestedUpTo
 	}
 	startAfter := int64(0)
-	if history.Room.Kind == "group" {
+	if history.Room.Kind == RoomGroup {
 		startAfter = history.JoinedSeq
 	}
 	if afterSeq != nil && *afterSeq > startAfter {

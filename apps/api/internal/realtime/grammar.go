@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log"
 
-	"example.com/computer-network/project/apps/api/internal/grammar"
+	"example.com/computer-network/project/apps/api/internal/ai/grammar"
 )
 
 const maxGrammarInflight = 3 // Per user, shared across that user's devices.
@@ -34,6 +34,13 @@ type grammarDone struct {
 	requestID string
 	corrected string
 	err       error
+}
+
+func (h *Hub) grammarCorrect(r request, p grammarRequest) (any, error) {
+	if err := h.startGrammar(r.client, r.id, r.identity.User.ID, p); err != nil {
+		return nil, err
+	}
+	return answered{}, nil // finishGrammar answers when the AI call completes.
 }
 
 // startGrammar never waits for the AI: run handles every user's commands in

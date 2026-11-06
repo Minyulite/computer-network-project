@@ -5,13 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 )
 
@@ -19,8 +18,6 @@ var ErrInvalidInput = errors.New("invalid input")
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrUnauthenticated = errors.New("unauthenticated")
 var ErrRateLimited = errors.New("rate limited")
-
-var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,24}$`)
 
 const sessionLifetime = 7 * 24 * time.Hour
 const SessionCookieName = "chat_session"
@@ -102,16 +99,12 @@ func (s *Service) withHashSlot(ctx context.Context, work func() (bool, error)) (
 	}
 }
 
-func canonicalUsername(username string) string {
-	return strings.ToLower(strings.TrimSpace(username))
-}
-
 func (s *Service) Signup(ctx context.Context, username, password, sourceIP, oldToken string) (Result, error) {
 	if !s.rates.allow("signup:ip:"+sourceIP, 5, time.Now()) {
 		return Result{}, ErrRateLimited
 	}
 	username = canonicalUsername(username)
-	if !usernamePattern.MatchString(username) || !validPassword(password) {
+	if !validUsername(username) || !validPassword(password) {
 		return Result{}, ErrInvalidInput
 	}
 	var encoded string
@@ -123,7 +116,7 @@ func (s *Service) Signup(ctx context.Context, username, password, sourceIP, oldT
 	if err != nil {
 		return Result{}, err
 	}
-	userID, err := randomUUID()
+	userID, err := id.New()
 	if err != nil {
 		return Result{}, err
 	}
@@ -148,7 +141,7 @@ func (s *Service) Login(ctx context.Context, username, password, sourceIP, oldTo
 	if !s.rates.allow("login:ip:"+sourceIP, 10, now) {
 		return Result{}, ErrRateLimited
 	}
-	if usernamePattern.MatchString(username) && !s.rates.allow("login:name:"+username, 10, now) {
+	if validUsername(username) && !s.rates.allow("login:name:"+strings.ToLower(username), 10, now) {
 		return Result{}, ErrRateLimited
 	}
 	if !validPassword(password) {
@@ -214,11 +207,11 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	if digest == nil {
 		return nil
 	}
-	id, err := s.db.RevokeSession(ctx, digest)
+	revokedID, err := s.db.RevokeSession(ctx, digest)
 	if err != nil {
 		return err
 	}
-	return s.notify(ctx, id)
+	return s.notify(ctx, revokedID)
 }
 
 func publicUser(record store.UserRecord) User {
@@ -226,7 +219,7 @@ func publicUser(record store.UserRecord) User {
 }
 
 func newSession(userID, oldToken string) (store.NewSession, string, error) {
-	id, err := randomUUID()
+	sessionID, err := id.New()
 	if err != nil {
 		return store.NewSession{}, "", err
 	}
@@ -236,7 +229,7 @@ func newSession(userID, oldToken string) (store.NewSession, string, error) {
 	}
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes[:])
 	digest := sha256.Sum256(tokenBytes[:])
-	return store.NewSession{ID: id, UserID: userID, TokenDigest: digest[:],
+	return store.NewSession{ID: sessionID, UserID: userID, TokenDigest: digest[:],
 		ExpiresAt: time.Now().UTC().Add(sessionLifetime), OldTokenDigest: digestToken(oldToken)}, token, nil
 }
 
@@ -247,15 +240,4 @@ func digestToken(token string) []byte {
 	}
 	digest := sha256.Sum256(decoded)
 	return digest[:]
-}
-
-func randomUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	raw := hex.EncodeToString(b[:])
-	return raw[0:8] + "-" + raw[8:12] + "-" + raw[12:16] + "-" + raw[16:20] + "-" + raw[20:32], nil
 }

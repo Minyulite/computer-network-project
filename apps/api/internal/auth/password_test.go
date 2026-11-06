@@ -18,6 +18,9 @@ func TestPasswordHashAndPolicy(t *testing.T) {
 	if !validPassword(strings.Repeat("💬", 128)) {
 		t.Fatal("128 code points and 512 bytes should be valid")
 	}
+	if validPassword("1234567") || !validPassword("12345678") || !validPassword("รหัสผ่านไทย8") {
+		t.Fatal("minimum of 8 code points not enforced")
+	}
 	first, err := hashPassword(valid)
 	if err != nil {
 		t.Fatal(err)

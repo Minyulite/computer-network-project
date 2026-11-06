@@ -305,11 +305,11 @@ test("grammar menu uses the chat socket and never sends the draft", async ({ bro
 
 test("authentication errors and keyboard forms", async ({ page, request }) => {
   await page.goto("/signup");
-  await page.getByLabel("Username", { exact: true }).fill("bad name");
+  await page.getByLabel("Username", { exact: true }).fill("ชื่อไทย");
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create account", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "3–24" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "3–24 English" })).toBeVisible();
   await page.getByLabel("Username", { exact: true }).fill("keyboard");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await connected(page);

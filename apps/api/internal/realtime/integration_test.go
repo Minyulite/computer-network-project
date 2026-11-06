@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"example.com/computer-network/project/apps/api/internal/ai/grammar"
+	"example.com/computer-network/project/apps/api/internal/ai/llm"
 	"example.com/computer-network/project/apps/api/internal/auth"
 	"example.com/computer-network/project/apps/api/internal/chat"
 	"example.com/computer-network/project/apps/api/internal/config"
-	"example.com/computer-network/project/apps/api/internal/grammar"
 	"example.com/computer-network/project/apps/api/internal/httpapi"
+	"example.com/computer-network/project/apps/api/internal/id"
 	"example.com/computer-network/project/apps/api/internal/store"
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,7 +40,7 @@ type testAccount struct {
 // newRig has no Gemini API key, so tests cannot send text to Google.
 func newRig(t *testing.T) *testRig {
 	t.Helper()
-	return newRigWithGrammar(t, grammar.New(grammar.Config{}))
+	return newRigWithGrammar(t, grammar.New(llm.New(llm.Config{})))
 }
 
 func newRigWithGrammar(t *testing.T, corrector GrammarCorrector) *testRig {
@@ -65,7 +67,7 @@ func newRigFull(t *testing.T, corrector GrammarCorrector, makeBots func(*chat.Se
 	if err := admin.Ping(ctx); err != nil {
 		t.Fatal("test database unavailable")
 	}
-	schema := "t5_" + strings.ReplaceAll(uuid()[:13], "-", "")
+	schema := "t5_" + strings.ReplaceAll(id.MustNew()[:13], "-", "")
 	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,7 @@ func newRigFull(t *testing.T, corrector GrammarCorrector, makeBots func(*chat.Se
 	}
 	h := New(a, chatService, corrector, bots, []string{testOrigin})
 	a.SetRevocationNotifier(h)
-	server := httptest.NewServer(httpapi.NewHandler(db, a, config.Config{AllowedOrigins: []string{testOrigin}}, h))
+	server := httptest.NewServer(httpapi.NewHandler(httpapi.Deps{DB: db, Auth: a, Config: config.Config{AllowedOrigins: []string{testOrigin}}, WebSocket: h}))
 	t.Cleanup(func() {
 		server.Close()
 		shutdown, stop := context.WithTimeout(context.Background(), 5*time.Second)
@@ -351,7 +353,7 @@ func TestDevicesPrivacyRevocationAndHistory(t *testing.T) {
 	if string(field(t, untilWithout(t, c1, "request.error", "inaccessible", "room.upserted"), "code")) != "\"room_unavailable\"" {
 		t.Fatal("private history leaked")
 	}
-	messageID := uuid()
+	messageID := id.MustNew()
 	send(t, a1, "send", "message.send", map[string]any{"roomId": opened.Room.ID, "clientMessageId": messageID, "text": "hello"})
 	ack := until(t, a1, "request.ok", "send")
 	if len(field(t, ack, "messageId")) == 0 {
@@ -383,7 +385,7 @@ func TestDevicesPrivacyRevocationAndHistory(t *testing.T) {
 	send(t, b1, "join", "group.join", map[string]any{"roomId": created.Room.ID})
 	_ = until(t, b1, "request.ok", "join")
 	_ = until(t, c1, "group.member_joined", "")
-	send(t, a1, "gsend", "message.send", map[string]any{"roomId": created.Room.ID, "clientMessageId": uuid(), "text": "group text"})
+	send(t, a1, "gsend", "message.send", map[string]any{"roomId": created.Room.ID, "clientMessageId": id.MustNew(), "text": "group text"})
 	_ = until(t, a1, "request.ok", "gsend")
 	_ = until(t, b1, "message.created", "")
 	send(t, c1, "group-unjoined", "room.history", map[string]any{"roomId": created.Room.ID})
