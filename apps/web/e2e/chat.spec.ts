@@ -84,6 +84,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     expect((await command(c, "room.history", { roomId: privateID })).payload.code).toBe("room_unavailable");
     expect((await command(c, "message.send", { roomId: privateID, clientMessageId: randomUUID(), text: "intrusion" })).payload.code).toBe("room_unavailable");
 
+    await a.getByRole("button", { name: "Groups", exact: true }).click();
     await a.getByRole("button", { name: "New group", exact: true }).click();
     await a.getByLabel("Group name", { exact: true }).fill("Network study");
     await a.getByRole("button", { name: "Create group", exact: true }).click();
@@ -91,6 +92,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await expect(a.getByLabel("Group members")).toContainText("alice");
     await expect(a.getByLabel("Group members")).not.toContainText("bob");
     await send(a, "Before Bob joined");
+    await b.getByRole("button", { name: "Groups", exact: true }).click();
     await b.getByRole("button", { name: "Network study Open to join", exact: true }).click();
     await expect(b.getByLabel("Group members")).toContainText("alice");
     await expect(b.getByRole("log")).toHaveCount(0);
@@ -100,6 +102,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await send(b, "After joining the group");
     await expect(a.getByRole("log")).toContainText("After joining the group");
     await expect(a.getByLabel("Group members")).toContainText("bob");
+    await c.getByRole("button", { name: "Groups", exact: true }).click();
     await c.getByRole("button", { name: "Network study Open to join", exact: true }).click();
     await expect(c.getByLabel("Group members")).toContainText("bob");
     await expect(c.getByRole("log")).toHaveCount(0);
@@ -348,15 +351,15 @@ test("shop assistant: owner configures it and a customer chats with it privately
   const owner = await ownerContext.newPage(), customer = await customerContext.newPage();
   try {
     await signup(owner, "shopowner"); await signup(customer, "shopper");
-    await owner.getByRole("button", { name: /Manage my assistants/ }).click();
-    await owner.getByRole("button", { name: "New assistant" }).click();
+    await owner.getByRole("button", { name: "Shops", exact: true }).click();
+    await owner.getByRole("button", { name: "New shop bot", exact: true }).click();
     await owner.getByLabel("Name", { exact: true }).fill("Corner Cafe");
     await owner.getByLabel("What is your shop about?").fill("A small coffee shop near the station.");
     await owner.getByRole("button", { name: "Add template" }).click();
     await owner.getByLabel("Question", { exact: true }).fill("What time do you open?");
     await owner.getByLabel("Answer", { exact: true }).fill("10.00");
     await owner.getByRole("button", { name: "Save assistant" }).click();
-    await expect(owner.getByText("Live", { exact: true })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "Edit Corner Cafe" })).toContainText("Live");
 
     // Everyone can find it, without seeing how it is configured.
     await customer.getByRole("button", { name: /Corner Cafe/ }).click();
@@ -366,7 +369,6 @@ test("shop assistant: owner configures it and a customer chats with it privately
     await expect(customer.getByRole("log")).toContainText("temporarily unavailable");
 
     // The owner never sees the customer's conversation.
-    await owner.getByRole("button", { name: "Back to chats" }).click();
     await expect(owner.getByText("What time do you open?", { exact: true })).toHaveCount(0);
     await expect(owner.locator(".room-row.selected")).toHaveCount(0);
   } finally { await ownerContext.close(); await customerContext.close(); }
@@ -388,11 +390,13 @@ test("avatar choice, and the one conversation list", async ({ browser }) => {
     await expect(d.getByRole("button", { name: `Chat with ${eli}`, exact: true }).locator(".presence")).toHaveCount(1);
 
     // A new group appears in the same list as two overlapping pictures, and anyone can join it.
+    await d.getByRole("button", { name: "Groups", exact: true }).click();
     await d.getByRole("button", { name: "New group", exact: true }).click();
     await d.getByLabel("Group name", { exact: true }).fill("Reading club");
     await d.getByRole("button", { name: "Create group", exact: true }).click();
     await expect(d.getByRole("heading", { name: "Reading club", exact: true })).toBeVisible();
     await expect(d.getByRole("button", { name: "Reading club Joined", exact: true }).locator(".group-stack")).toHaveCount(1);
+    await e.getByRole("button", { name: "Groups", exact: true }).click();
     await e.getByRole("button", { name: "Reading club Open to join", exact: true }).click();
     await e.getByRole("button", { name: "Join group", exact: true }).click();
     await expect(e.getByLabel("Group members")).toContainText(dora);

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { Avatar, GroupAvatar, PersonAvatar } from "@/components/avatar";
-import { BotManager } from "@/components/bot-manager";
+import { Modal } from "@/components/modal";
+import { BotEditor, maxBots } from "@/components/bot-manager";
 import { GrammarTextarea } from "@/components/grammar-textarea";
-import { Brand, BrandMark, ChatIcon, LanguagesIcon, LogOutIcon, SearchIcon, SendIcon, SlidersIcon, StoreIcon, UserIcon, UserPlusIcon, UsersIcon } from "@/components/icons";
+import { Brand, BrandMark, ChatIcon, LanguagesIcon, LogOutIcon, PlusIcon, SearchIcon, SendIcon, StoreIcon, UserIcon, UserPlusIcon, UsersIcon } from "@/components/icons";
 import { ApiError, authRequest, errorText, type Session, type User } from "@/lib/api";
 import { botAvatar, personAvatar } from "@/lib/avatars";
 import { ChatStore } from "@/lib/chat/store";
@@ -89,16 +90,6 @@ function useNow(intervalMs = 30_000) {
 const isActive = (row: Row) => row.kind === "group" ? row.joined : !!row.roomId;
 const lastTime = (row: Row) => row.last ? Date.parse(row.last.at) : 0;
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  // A native modal dialog traps focus, closes on Escape and blocks the page behind it.
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="dialog" aria-labelledby="dialog-title" onClose={onClose}
-    onClick={event => { if (event.target === dialog.current) onClose(); }}>
-    <h2 id="dialog-title">{title}</h2>{children}
-  </dialog>;
-}
-
 type DialogProps = { uncertain?: boolean; onSubmit: (name: string) => Promise<void>; onRefresh: () => Promise<void>; onClose: () => void };
 
 function GroupDialog({ uncertain, onSubmit, onRefresh, onClose }: DialogProps) {
@@ -139,7 +130,7 @@ function ChatWorkspace({ user }: { user: User }) {
   const [createUncertain, setCreateUncertain] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState("");
-  const [managing, setManaging] = useState(false);
+  const [editingBot, setEditingBot] = useState<string | null>(null);
   const [view, setView] = useState<View>("all");
   const now = useNow();
   const end = useRef<HTMLDivElement>(null);
@@ -188,7 +179,8 @@ function ChatWorkspace({ user }: { user: User }) {
     rows.push({ kind: "group", key: item.id, name: item.name, group: item, joined: !!groupRoom, last: lastOf(groupRoom) });
   }
   const shownKinds = view === "all" ? ["person", "shop", "group"] : view === "people" ? ["person"] : view === "groups" ? ["group"] : ["shop"];
-  const shown = rows.filter(row => shownKinds.includes(row.kind) && row.name.toLowerCase().includes(filter.toLowerCase()))
+  // Groups the user has not joined only show up on the Groups tab, in their own section.
+  const shown = rows.filter(row => shownKinds.includes(row.kind) && !(view === "all" && row.kind === "group" && !row.joined) && row.name.toLowerCase().includes(filter.toLowerCase()))
     .sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || lastTime(b) - lastTime(a) ||
       Number(b.kind === "person" && b.online) - Number(a.kind === "person" && a.online) || a.name.localeCompare(b.name));
 
@@ -196,15 +188,15 @@ function ChatWorkspace({ user }: { user: User }) {
     setBusy(true); setActionError("");
     try { await fn(); } catch (e) { setActionError(errorText(e)); } finally { setBusy(false); }
   }
-  function choose(id: string) { setManaging(false); store.select(id); }
-  async function chatWithBot(botId: string) { setManaging(false); await action(() => store.openBot(botId)); }
+  function choose(id: string) { store.select(id); }
+  async function chatWithBot(botId: string) { await action(() => store.openBot(botId)); }
   async function logout() {
     await authRequest("/auth/logout", {});
     store.stop(); router.replace("/signin");
   }
   async function createGroup(name: string) {
     try { await store.createGroup(name); } catch (e) { setCreateUncertain(true); throw e; }
-    setCreating(false); setManaging(false);
+    setCreating(false); 
   }
   function openRow(row: Row) {
     if (row.kind === "person") { if (row.roomId) choose(row.roomId); else void action(() => store.openDirect(row.user)); }
@@ -232,27 +224,43 @@ function ChatWorkspace({ user }: { user: User }) {
     setDrafts(value => ({ ...value, [room.id]: next }));
     requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(from, from + converted.length); });
   }
+  function renderRow(row: Row) {
+    const selected = row.kind === "group" ? state.selected === row.group.id : !!row.roomId && state.selected === row.roomId;
+    const disabled = row.kind !== "group" && (!connected || busy) && !(row.kind === "person" && row.roomId);
+    return <button className={`room-row ${selected ? "selected" : ""}`} key={row.key} aria-pressed={selected} disabled={disabled}
+      aria-label={row.kind === "person" ? `Chat with ${row.name}` : undefined} onClick={() => openRow(row)}>
+      {row.kind === "person" ? <PersonAvatar user={row.user} online={row.online} />
+        : row.kind === "shop" ? <Avatar id={botAvatar(row.bot.avatar)} bot />
+        : <GroupAvatar members={row.group.preview ?? []} />}
+      <span className="row-body">
+        <span className="row-top"><span className="row-title">{row.name}</span>
+          {row.last && <time className="row-time" dateTime={row.last.at}>{relativeTime(row.last.at, now)}</time>}</span>
+        <span className="row-sub">{row.last ? <>{row.last.own ? <span className="you">You: </span> : row.kind === "group" && row.last.who ? `${row.last.who}: ` : null}{row.last.text}</>
+          : row.kind === "person" ? (row.online ? "Online" : "Offline")
+          : row.kind === "shop" ? `Shop assistant by ${row.bot.ownerUsername}` : row.joined ? "Joined" : "Open to join"}</span>
+      </span>
+    </button>;
+  }
   if (state.status === "expired") return <main className="loading-shell"><Brand /><h1>Sign in again</h1>
     <p className="muted">Your session ended, or another account signed in on this browser.</p><Link className="button primary" href="/signin">Sign in</Link></main>;
 
   const botOwner = room?.kind === "bot" ? state.bots.find(bot => bot.id === room.botId)?.ownerUsername : undefined;
   const members = group ? state.members[group.id] : undefined;
-  const subtitle = managing ? "Your shop"
-    : group ? (members ? `${members.length} ${members.length === 1 ? "member" : "members"}, ${members.filter(member => online.has(member.user.id)).length} online` : "Group")
+  const subtitle = group ? (members ? `${members.length} ${members.length === 1 ? "member" : "members"}, ${members.filter(member => online.has(member.user.id)).length} online` : "Group")
     : room?.kind === "bot" ? (botOwner ? `Shop assistant by ${botOwner}` : "Shop assistant")
     : room ? (online.has(otherUserID(room, user) ?? "") ? "Online" : "Offline")
     : undefined;
   const connection = state.syncing ? "Syncing…" : state.status === "connected" ? "Connected" : state.status === "connecting" ? "Connecting…" : state.status === "reconnecting" ? "Reconnecting…" : "Offline";
 
   return <main className="workspace">
+    {editingBot && <BotEditor store={store} botId={editingBot} connected={connected} onClose={() => setEditingBot(null)} />}
     <nav className="rail" aria-label="Sections">
       <span className="rail-logo" role="img" aria-label="Commonroom"><BrandMark size={24} /></span>
-      {views.map(item => <button key={item.id} className="rail-item" aria-pressed={view === item.id && !managing}
-        onClick={() => { setManaging(false); setView(item.id); }}>{item.icon}{item.label}</button>)}
+      {views.map(item => <button key={item.id} className="rail-item" aria-pressed={view === item.id}
+        onClick={() => setView(item.id)}>{item.icon}{item.label}</button>)}
       <span className="rail-spacer" />
       <span className="rail-divider" />
       <div className="rail-account" title={user.username}><PersonAvatar user={user} size="sm" /><span>{user.username}</span></div>
-      <button className="rail-item" aria-label="Manage my assistants" aria-pressed={managing} onClick={() => setManaging(true)}><SlidersIcon size={20} />My shops</button>
       <button className="rail-item" onClick={() => void action(logout)} disabled={busy}><LogOutIcon size={20} />Sign out</button>
     </nav>
 
@@ -261,32 +269,30 @@ function ChatWorkspace({ user }: { user: User }) {
         <div className="list-tools">
           <label className="search-label"><span className="sr-only">Find people or groups</span><SearchIcon size={18} />
             <input type="search" placeholder="Search" aria-label="Find people or groups" value={filter} onChange={e => setFilter(e.target.value)} /></label>
-          <button className="icon-button" aria-label="New group" title="New group" disabled={!connected} onClick={() => setCreating(true)}><UserPlusIcon size={20} /></button>
+          {view === "groups" && <button className="icon-button" aria-label="New group" title="New group" disabled={!connected} onClick={() => setCreating(true)}><UserPlusIcon size={20} /></button>}
+          {view === "shops" && <button className="icon-button" aria-label="New shop bot" title="New shop bot" disabled={!connected || state.myBots.length >= maxBots} onClick={() => setEditingBot("new")}><PlusIcon size={20} /></button>}
         </div>
         <div className="sidebar-scroll">
-          {shown.map(row => {
-            const selected = row.kind === "group" ? state.selected === row.group.id : !!row.roomId && state.selected === row.roomId;
-            const disabled = row.kind !== "group" && (!connected || busy) && !(row.kind === "person" && row.roomId);
-            return <button className={`room-row ${selected ? "selected" : ""}`} key={row.key} aria-pressed={selected} disabled={disabled}
-              aria-label={row.kind === "person" ? `Chat with ${row.name}` : undefined} onClick={() => openRow(row)}>
-              {row.kind === "person" ? <PersonAvatar user={row.user} online={row.online} />
-                : row.kind === "shop" ? <Avatar id={botAvatar(row.bot.avatar)} bot />
-                : <GroupAvatar members={row.group.preview ?? []} />}
-              <span className="row-body">
-                <span className="row-top"><span className="row-title">{row.name}</span>
-                  {row.last && <time className="row-time" dateTime={row.last.at}>{relativeTime(row.last.at, now)}</time>}</span>
-                <span className="row-sub">{row.last ? <>{row.last.own ? <span className="you">You: </span> : row.kind === "group" && row.last.who ? `${row.last.who}: ` : null}{row.last.text}</>
-                  : row.kind === "person" ? (row.online ? "Online" : "Offline")
-                  : row.kind === "shop" ? `Shop assistant by ${row.bot.ownerUsername}` : row.joined ? "Joined" : "Open to join"}</span>
-              </span>
-            </button>;
-          })}
+          {view === "groups" ? <>
+            {shown.some(row => row.kind === "group" && row.joined) && <h2 className="list-section">Your groups</h2>}
+            {shown.filter(row => row.kind === "group" && row.joined).map(renderRow)}
+            {shown.some(row => row.kind === "group" && !row.joined) && <h2 className="list-section">Open to join</h2>}
+            {shown.filter(row => row.kind === "group" && !row.joined).map(renderRow)}
+          </> : view === "shops" ? <>
+            {state.myBots.length > 0 && !filter && <h2 className="list-section">Your shops</h2>}
+            {!filter && state.myBots.map(bot => <button className="room-row" key={`mine-${bot.id}`} aria-label={`Edit ${bot.name}`} onClick={() => setEditingBot(bot.id)}>
+              <Avatar id={botAvatar(bot.avatar)} bot />
+              <span className="row-body"><span className="row-top"><span className="row-title">{bot.name}</span></span>
+                <span className="row-sub">{bot.enabled ? "Live · tap to edit" : "Turned off · tap to edit"}</span></span></button>)}
+            {shown.length > 0 && state.myBots.length > 0 && !filter && <h2 className="list-section">All shops</h2>}
+            {shown.map(renderRow)}
+          </> : shown.map(renderRow)}
           {shown.length === 0 && <p className="empty-note">{filter ? "Nothing matches your search" : connected ? "No one is here yet. Create a group, or wait for people to come online" : "Waiting for connection…"}</p>}
         </div>
       </aside>
 
       <section className="chat-column" aria-label="Chat">
-        <header className="chat-header"><div className="chat-title"><h1>{managing ? "Shop assistants" : selectedTitle ?? "Conversations"}</h1>
+        <header className="chat-header"><div className="chat-title"><h1>{selectedTitle ?? "Conversations"}</h1>
           {subtitle && <p className="subtitle">{subtitle}</p>}</div>
           <div className="header-actions">
             <div className="connection" role="status" data-testid="connection"><i className={connected ? "presence" : "presence offline"} />{connection}</div>
@@ -295,8 +301,7 @@ function ChatWorkspace({ user }: { user: User }) {
         {state.status !== "connected" && <div className="notice">Your drafts are kept while the connection returns <button onClick={store.reconnect}>Reconnect now</button></div>}
         {(actionError || state.error) && <div className="notice error" role="alert">{actionError || state.error} <button onClick={() => { setActionError(""); store.clearError(); }}>Dismiss</button>
           {state.error && <button disabled={!connected} onClick={() => void store.refresh()}>Refresh conversations</button>}</div>}
-        {managing ? <BotManager store={store} bots={state.myBots} connected={connected} onClose={() => setManaging(false)} onOpenBot={id => void chatWithBot(id)} /> :
-        !state.selected ? <div className="welcome"><h2>Pick someone to talk to</h2>
+        {!state.selected ? <div className="welcome"><h2>Pick someone to talk to</h2>
           <p>Choose a person for a private chat, open a group to read along and join, or ask a shop&apos;s assistant a question.</p>
           <p className="welcome-online"><i className={othersOnline ? "presence" : "presence offline"} />{othersOnline ? `${othersOnline} ${othersOnline === 1 ? "person" : "people"} online now` : "No one else is online yet"}</p></div> :
           <>
