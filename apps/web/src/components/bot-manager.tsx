@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { ArrowLeftIcon, PlusIcon } from "@/components/icons";
 import { errorText } from "@/lib/api";
 import type { ChatStore } from "@/lib/chat/store";
 import type { Bot, BotInput } from "@/lib/chat/types";
@@ -49,15 +50,15 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
   }
 
   return <section className="bot-manager" aria-label="My shop assistants">
-    <header className="bot-manager-head"><div><p className="eyebrow">YOUR SHOP</p><h1>Shop assistants</h1></div>
-      <button type="button" onClick={onClose}>Back to chats</button></header>
-    <p className="small muted bot-note">Customers chat with your assistant privately; you do not see their conversations. Their messages and your description are sent to Google Gemini to write answers. Replies to template questions are your own words, unchanged.</p>
+    <header className="bot-manager-head">
+      <p className="bot-note">Customers chat with your assistant privately; you do not see their conversations. Their messages and your description are sent to Google Gemini to write answers. Replies to template questions are your own words, unchanged.</p>
+      <button type="button" className="with-icon" onClick={onClose}><ArrowLeftIcon />Back to chats</button></header>
     {error && <p className="error" role="alert">{error}</p>}
 
     {editing === null ? <>
       {!bots.length && <p className="muted">You have no assistants yet. Create one to answer customer questions automatically.</p>}
       <ul className="bot-list">{bots.map(bot => <li key={bot.id}>
-        <span><strong>{bot.name}</strong><small>{bot.enabled ? "Live" : "Turned off"}</small></span>
+        <span><strong>{bot.name}</strong><small className="bot-status">{bot.enabled && <i className="presence" />}{bot.enabled ? "Live" : "Turned off"}</small></span>
         <span className="bot-actions">
           <button type="button" disabled={!connected || busy || !bot.enabled} onClick={() => onOpenBot(bot.id)}>Try it</button>
           <button type="button" disabled={!connected || busy} onClick={() => void edit(bot.id)}>Edit</button>
@@ -65,24 +66,24 @@ export function BotManager({ store, bots, connected, onClose, onOpenBot }: Props
       <button type="button" className="primary" disabled={!connected || busy || bots.length >= limits.bots} onClick={startNew}>New assistant</button>
       {bots.length >= limits.bots && <p className="small muted">You can have up to {limits.bots} assistants.</p>}
     </> : <form className="bot-form" onSubmit={save}>
-      <label>Name<input value={form.name} maxLength={limits.name} required onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Corner Café" /></label>
+      <label>Name<input value={form.name} maxLength={limits.name} required onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Corner Café" /></label>
       <label>What is your shop about?
         <textarea rows={6} value={form.description} maxLength={limits.description} onChange={e => setForm({ ...form, description: e.target.value })}
           placeholder="What you sell, where you are, opening hours, prices, policies. The assistant answers only from this text and your templates." /></label>
-      <small className="muted">{count(form.description)}/{limits.description}</small>
+      <small className="muted figure field-count">{count(form.description).toLocaleString()}/{limits.description.toLocaleString()}</small>
 
-      <fieldset className="bot-templates"><legend>Answer templates <small>{form.templates.length}/{limits.templates}</small></legend>
+      <fieldset className="bot-templates"><legend>Answer templates <small className="count">{form.templates.length}/{limits.templates}</small></legend>
         <p className="small muted">When a customer asks something similar to a question, the assistant sends your answer exactly as written.</p>
         {form.templates.map((t, i) => <div className="bot-template" key={i}>
           <label>Question<input value={t.question} maxLength={limits.question} onChange={e => setTemplate(i, { question: e.target.value })} placeholder="What time do you open?" /></label>
-          <label>Answer<textarea rows={2} value={t.answer} maxLength={limits.answer} onChange={e => setTemplate(i, { answer: e.target.value })} placeholder="10.00" /></label>
+          <label>Answer<textarea rows={2} value={t.answer} maxLength={limits.answer} onChange={e => setTemplate(i, { answer: e.target.value })} placeholder="We open at 10:00, Monday to Saturday" /></label>
           <button type="button" className="text-button" onClick={() => setForm(value => ({ ...value, templates: value.templates.filter((_, j) => j !== i) }))}>Remove</button>
         </div>)}
-        <button type="button" disabled={form.templates.length >= limits.templates}
-          onClick={() => setForm(value => ({ ...value, templates: [...value.templates, { question: "", answer: "" }] }))}>Add template</button>
+        <button type="button" className="with-icon add-template" disabled={form.templates.length >= limits.templates}
+          onClick={() => setForm(value => ({ ...value, templates: [...value.templates, { question: "", answer: "" }] }))}><PlusIcon />Add template</button>
       </fieldset>
 
-      {editing !== "new" && <label className="bot-toggle"><input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} /> Live (customers can find and chat with it)</label>}
+      {editing !== "new" && <label className="bot-toggle"><input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} /> Live, so customers can find and chat with it</label>}
       <div className="bot-actions">
         <button className="primary" disabled={!connected || busy}>{busy ? "Saving…" : "Save assistant"}</button>
         <button type="button" disabled={busy} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
