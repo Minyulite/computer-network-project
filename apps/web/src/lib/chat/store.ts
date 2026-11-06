@@ -1,6 +1,6 @@
 import { errorText, type User } from "../api";
 import { ChatSocket, CommandError, newID } from "./socket";
-import type { ChatState, Feed, Group, History, Member, Message, Page, PendingMessage, Room, ServerEvent } from "./types";
+import type { BotDetail, BotInput, Bot, ChatState, Feed, Group, History, Member, Message, Page, PendingMessage, Room, ServerEvent } from "./types";
 
 const emptyFeed = (): Feed => ({ messages: [], through: 0, more: false, loaded: false, loading: false });
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -31,7 +31,7 @@ export class ChatStore {
   private dirtyMembers = new Set<string>();
 
   constructor(readonly user: User) {
-    this.state = { status: "connecting", syncing: true, error: "", rooms: [], groups: [], online: [],
+    this.state = { status: "connecting", syncing: true, error: "", rooms: [], groups: [], bots: [], myBots: [], online: [],
       known: { [user.id]: user }, members: {}, selected: null, feeds: {}, pending: [] };
     this.socket = new ChatSocket(user.id, status => {
       if (status !== "connected") {
@@ -41,7 +41,7 @@ export class ChatStore {
         this.historyTasks.clear(); this.memberTasks.clear(); this.dirtyMembers.clear();
       }
       if (status === "expired") {
-        this.patch({ status, rooms: [], groups: [], online: [], feeds: {}, members: {}, pending: [], selected: null, known: {}, syncing: false });
+        this.patch({ status, rooms: [], groups: [], bots: [], myBots: [], online: [], feeds: {}, members: {}, pending: [], selected: null, known: {}, syncing: false });
       } else this.patch({ status, ...(status !== "connected" ? { syncing: false } : {}) });
     }, event => this.receive(event), error => this.patch({ error }));
   }
@@ -97,6 +97,14 @@ export class ChatStore {
         }
         break;
       }
+      case "bot.upserted": {
+        const { bot } = event.payload;
+        this.remember([{ id: bot.ownerId, username: bot.ownerUsername }]);
+        // The catalogue lists enabled bots only; owners keep disabled ones in "My bots".
+        this.patch({ bots: bot.enabled ? upsert(this.state.bots, bot) : this.state.bots.filter(item => item.id !== bot.id),
+          ...(bot.ownerId === this.user.id ? { myBots: upsert(this.state.myBots, bot) } : {}) });
+        break;
+      }
       case "room.upserted":
         this.patch({ rooms: upsert(this.state.rooms, event.payload.room) });
         break;
@@ -149,10 +157,12 @@ export class ChatStore {
       try {
         const online = await this.pages<User>("users.list", generation);
         const groups = await this.pages<Group>("groups.list", generation);
+        const bots = await this.pages<Bot>("bots.list", generation);
         const rooms = await this.pages<Room>("rooms.list", generation);
+        const mine = await this.read<{ bots: Bot[] }>("bots.mine");
         if (generation !== this.generation) return;
         this.remember(online);
-        this.patch({ online, groups, rooms, members: {} });
+        this.patch({ online, groups, bots, rooms, myBots: mine.bots, members: {} });
       } catch (e) {
         if (generation === this.generation) this.patch({ error: `Could not refresh conversations. ${errorText(e)}` });
       } finally {
@@ -185,6 +195,24 @@ export class ChatStore {
   openDirect = (user: User) => { this.remember([user]); return this.roomCommand("direct.open", { receiverId: user.id }); };
   createGroup = (name: string) => this.roomCommand("group.create", { name });
   joinGroup = (roomId: string) => this.roomCommand("group.join", { roomId });
+  openBot = (botId: string) => this.roomCommand("bot.open", { botId });
+  getBot = (botId: string) => this.socket.request<BotDetail>("bot.get", { botId });
+  // Creates the bot, or replaces its settings and whole template set when botId is given.
+  saveBot = async (botId: string | undefined, input: BotInput) => {
+    const generation = this.generation;
+    const payload = { name: input.name, description: input.description,
+      templates: input.templates.map(({ question, answer }) => ({ question, answer })) };
+    const detail = botId
+      ? await this.socket.request<BotDetail>("bot.update", { botId, enabled: input.enabled, ...payload })
+      : await this.socket.request<BotDetail>("bot.create", payload);
+    if (generation === this.generation) {
+      const bot: Bot = { id: detail.id, name: detail.name, ownerId: detail.ownerId, ownerUsername: detail.ownerUsername,
+        enabled: detail.enabled, createdAt: detail.createdAt };
+      this.patch({ myBots: upsert(this.state.myBots, bot),
+        bots: bot.enabled ? upsert(this.state.bots, bot) : this.state.bots.filter(item => item.id !== bot.id) });
+    }
+    return detail;
+  };
 
   loadMembers = (roomId: string): Promise<void> => {
     const existing = this.memberTasks.get(roomId);

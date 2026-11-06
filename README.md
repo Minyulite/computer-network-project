@@ -87,6 +87,10 @@ To enable it, set `GEMINI_API_KEY` in `apps/api/.env` and restart the API. Only 
 
 Automated tests never call Gemini, so check real corrections by hand with a key before a demonstration.
 
+## Shop assistants (AI chatbots)
+
+Choose **Manage my assistants** in the sidebar to create an assistant for your shop: a name, a description of the shop, and answer templates such as "What time do you open?" → "10.00". Other users find it under **Shop assistants** and chat with it privately; you cannot read their conversations (use **Try it** to test your own). A first Gemini call decides whether the message matches a template (your answer is sent exactly), is otherwise within what the description covers (a second call answers from the description only), or is off topic (a fixed refusal). It uses the same `GEMINI_API_KEY` as grammar correction; without a key every assistant replies that it is temporarily unavailable. Customer messages and your description are sent to Google. Details and limits are in [backend.md](backend.md#shop-assistants-chatbots).
+
 ## Frontend and integration validation
 
 ```sh

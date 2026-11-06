@@ -33,7 +33,7 @@ func (db *DB) UserByUsername(parent context.Context, username string) (UserRecor
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var user UserRecord
-	err := db.Pool.QueryRow(ctx, `SELECT id, username, password_hash, created_at FROM users WHERE username = $1`, username).
+	err := db.Pool.QueryRow(ctx, `SELECT id, username, password_hash, created_at FROM users WHERE username = $1 AND NOT is_bot`, username).
 		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UserRecord{}, ErrNotFound

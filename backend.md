@@ -489,6 +489,23 @@ The coordinator handles every user's commands in order, so it must not wait for 
 
 The selected text and its context are sent to Google, and the UI says so. Do not log them.
 
+## Shop assistants (chatbots)
+
+Any user can create up to 5 assistants (bots), each with a name, a free-text shop description (up to 2,000 characters) and up to 20 answer templates (question up to 300, answer up to 1,000 characters). Customers chat with an assistant in a private `bot` room; the owner is not a member and cannot read it.
+
+Each bot has a system user (`users.is_bot`, username `bot_<12 hex>`, unusable password hash) that is the second member of every one of its rooms. Replies are ordinary `messages` rows, so `seq`, history and reconnect recovery work unchanged. The reply's `clientMessageId` is derived from the customer message ID, so answering the same message twice stores one reply.
+
+Commands (all payloads are strict objects): `bots.list` (`limit`, `cursor`; enabled bots only: id, name, owner), `bots.mine`, `bot.get` (`botId`; owner only), `bot.create` (`name`, `description`, `templates[{question, answer}]`), `bot.update` (`botId`, `name`, `description`, `enabled`, `templates`; the template set is replaced), `bot.open` (`botId`; returns the caller's room, creating it on first use). Events: `bot.upserted` (`bot` summary, to everyone; description and templates are never broadcast). Errors: `bot_unavailable`, `bot_limit`.
+
+Answering (`internal/botai`) runs outside the hub, like grammar: after `message.send` is acknowledged, a worker makes up to two Gemini calls and the stored reply returns to the hub as a control message that broadcasts `message.created`.
+
+1. **Classify** (JSON schema): `template` (with label `tN`), `in_scope` or `out_of_scope`, from the shop description, template questions (never their answers), the last 8 turns and the new message.
+2. `template`: the owner's answer is sent verbatim. An unknown label is never guessed; it falls back to `in_scope`.
+3. `in_scope`: second call, grounded only in the description; unknown facts are admitted, not invented.
+4. `out_of_scope`: a fixed reply. A bot with neither description nor templates answers this without calling Gemini.
+
+Customer text, descriptions and templates are untrusted data: they are placed inside tags, `<` and `>` are neutralised, and the system prompts tell the model to ignore instructions in them. If Gemini fails or is not configured, the customer gets a fixed apology so the thread is never left silent. A disabled bot replies that it is off. Each user may have 3 bot replies in progress at once; extra messages get a short "busy" reply without an AI call. Message text is never logged. Customer messages and shop descriptions are sent to Google.
+
 ## 11. Validation and operational limits
 
 These are the initial enforced values, to be exercised in tests rather than treated as performance claims:

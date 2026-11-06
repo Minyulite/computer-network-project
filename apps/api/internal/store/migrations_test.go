@@ -96,7 +96,7 @@ func TestMigrationsFreshRepeatedConcurrentAndRestart(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name IN ('users','sessions','rooms','room_members','messages')").Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 1 || tables != 5 {
+	if versions != 2 || tables != 5 {
 		t.Fatalf("versions=%d tables=%d", versions, tables)
 	}
 	_, err = db.Pool.Exec(ctx, "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)", "00000000-0000-0000-0000-000000000001", "persisted", "fixture")

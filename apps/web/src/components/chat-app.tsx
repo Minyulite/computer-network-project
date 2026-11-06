@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { BotManager } from "@/components/bot-manager";
 import { GrammarTextarea } from "@/components/grammar-textarea";
 import { ApiError, authRequest, errorText, type Session, type User } from "@/lib/api";
 import { ChatStore } from "@/lib/chat/store";
@@ -30,6 +31,7 @@ export function ChatApp() {
 
 function roomName(room: Room, state: ChatState, user: User) {
   if (room.kind === "group") return room.name ?? "Group";
+  if (room.kind === "bot") return room.botName ?? "Shop assistant";
   const other = room.directUserLow === user.id ? room.directUserHigh : room.directUserLow;
   return state.known[other ?? ""]?.username ?? `Private chat · ${other?.slice(0, 8)}`;
 }
@@ -44,6 +46,7 @@ function ChatWorkspace({ user }: { user: User }) {
   const [createUncertain, setCreateUncertain] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState("");
+  const [managing, setManaging] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { store.start(); return () => store.stop(); }, [store]);
   const room = state.rooms.find(room => room.id === state.selected);
@@ -61,6 +64,8 @@ function ChatWorkspace({ user }: { user: User }) {
     setBusy(true); setActionError("");
     try { await fn(); } catch (e) { setActionError(errorText(e)); } finally { setBusy(false); }
   }
+  function choose(id: string) { setManaging(false); store.select(id); }
+  async function chatWithBot(botId: string) { setManaging(false); await action(() => store.openBot(botId)); }
   async function logout() {
     await authRequest("/auth/logout", {});
     store.stop(); router.replace("/signin");
@@ -114,14 +119,25 @@ function ChatWorkspace({ user }: { user: User }) {
         <section aria-labelledby="private-heading"><h2 id="private-heading">Private conversations</h2>
           {!state.rooms.some(room => room.kind === "direct") && <p className="small muted">Choose someone online to say hello.</p>}
           {state.rooms.filter(room => room.kind === "direct" && visible(roomName(room, state, user))).map(room =>
-            <button className={`room-row ${state.selected === room.id ? "selected" : ""}`} key={room.id} aria-pressed={state.selected === room.id} onClick={() => store.select(room.id)}>
+            <button className={`room-row ${state.selected === room.id ? "selected" : ""}`} key={room.id} aria-pressed={state.selected === room.id} onClick={() => choose(room.id)}>
               <span className="room-symbol">↗</span><span>{roomName(room, state, user)}</span>
             </button>)}
+        </section>
+        <section aria-labelledby="bots-heading"><h2 id="bots-heading">Shop assistants <span>{state.bots.length}</span></h2>
+          {!state.bots.length && <p className="small muted">No shops have an assistant yet.</p>}
+          {state.bots.filter(bot => visible(bot.name)).map(bot => {
+            const botRoom = state.rooms.find(item => item.kind === "bot" && item.botId === bot.id);
+            return <button className={`room-row ${botRoom && state.selected === botRoom.id ? "selected" : ""}`} key={bot.id}
+              aria-pressed={!!botRoom && state.selected === botRoom.id} disabled={!connected || busy} onClick={() => void chatWithBot(bot.id)}>
+              <span className="room-symbol">✦</span><span>{bot.name}<small>by {bot.ownerUsername}</small></span>
+            </button>;
+          })}
+          <button className="text-button" onClick={() => setManaging(true)}>Manage my assistants ({state.myBots.length})</button>
         </section>
         <section aria-labelledby="groups-heading"><h2 id="groups-heading">Discover groups <span>{state.groups.length}</span></h2>
           {!state.groups.length && <p className="small muted">Start a shared space for your people.</p>}
           {state.groups.filter(group => visible(group.name)).map(group =>
-            <button className={`room-row ${state.selected === group.id ? "selected" : ""}`} key={group.id} aria-pressed={state.selected === group.id} onClick={() => store.select(group.id)}>
+            <button className={`room-row ${state.selected === group.id ? "selected" : ""}`} key={group.id} aria-pressed={state.selected === group.id} onClick={() => choose(group.id)}>
               <span className="room-symbol">#</span><span>{group.name}<small>{state.rooms.some(room => room.id === group.id) ? "Joined" : "Open to join"}</small></span>
             </button>)}
           <form className="group-form" onSubmit={create}><label htmlFor="group-name">Create a group</label>
@@ -137,15 +153,16 @@ function ChatWorkspace({ user }: { user: User }) {
     </aside>
 
     <section className="chat-column" aria-label="Chat">
-      <header className="chat-header"><div><p className="eyebrow">{group ? "GROUP CONVERSATION" : room ? "PRIVATE CONVERSATION" : "YOUR SPACE"}</p>
-        <h1>{selectedTitle ?? "Let’s talk."}</h1></div>
+      <header className="chat-header"><div><p className="eyebrow">{managing ? "YOUR SHOP" : group ? "GROUP CONVERSATION" : room?.kind === "bot" ? "SHOP ASSISTANT" : room ? "PRIVATE CONVERSATION" : "YOUR SPACE"}</p>
+        <h1>{managing ? "Shop assistants" : selectedTitle ?? "Let’s talk."}</h1></div>
         <div className="connection" role="status" data-testid="connection"><i className={connected ? "online-dot" : "offline-dot"} />
           {state.syncing ? "Syncing…" : state.status === "connected" ? "Connected" : state.status === "connecting" ? "Connecting…" : state.status === "reconnecting" ? "Reconnecting…" : "Offline"}</div>
       </header>
       {state.status !== "connected" && <div className="notice">Your drafts are kept while the connection returns. <button onClick={store.reconnect}>Reconnect now</button></div>}
       {(actionError || state.error) && <div className="notice error" role="alert">{actionError || state.error} <button onClick={() => { setActionError(""); store.clearError(); }}>Dismiss</button>
         {state.error && <button disabled={!connected} onClick={() => void store.refresh()}>Refresh conversations</button>}</div>}
-      {!state.selected ? <div className="welcome"><div className="welcome-icon">↗</div><p className="eyebrow">MAKE A CONNECTION</p><h2>A conversation away.</h2>
+      {managing ? <BotManager store={store} bots={state.myBots} connected={connected} onClose={() => setManaging(false)} onOpenBot={id => void chatWithBot(id)} /> :
+      !state.selected ? <div className="welcome"><div className="welcome-icon">↗</div><p className="eyebrow">MAKE A CONNECTION</p><h2>A conversation away.</h2>
         <p>Choose someone online for a private chat,<br />or find a group and make yourself at home.</p><div className="welcome-tags"><span>One to one</span><span>Groups</span><span>All your devices</span></div></div> :
         <>
           {group && <div className="members" aria-label="Group members"><strong>Members</strong>
@@ -159,12 +176,14 @@ function ChatWorkspace({ user }: { user: User }) {
               {feed?.error && <p className="error" role="alert">{feed.error} <button disabled={!connected} onClick={() => void store.loadHistory(room.id)}>Retry history</button></p>}
               {feed?.loaded && !feed.messages.length && <div className="empty-conversation"><p>No messages yet.</p><span>{group ? "You’ll see messages posted after you joined." : "Send the first hello."}</span></div>}
               {feed?.messages.map(message => <article className={`message ${message.sender.id === user.id ? "own" : ""}`} key={message.id} data-message-id={message.id}>
-                <div className="message-meta"><strong>{message.sender.id === user.id ? "You" : message.sender.username}</strong>
+                <div className="message-meta"><strong>{message.sender.id === user.id ? "You" : room.kind === "bot" ? room.botName ?? "Assistant" : message.sender.username}</strong>
                   {message.sentAt && <time dateTime={message.sentAt} title={new Date(message.sentAt).toLocaleString()}>{new Date(message.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>}</div>
                 <p>{message.text}</p></article>)}
               {pending.map(item => <article className="message own pending" key={item.clientMessageId}><p>{item.text}</p>
                 <small>{item.state === "sending" ? "Saving…" : "Not confirmed"}</small>
                 {item.state === "uncertain" && <><p className="small">{item.error}</p><button disabled={!connected} onClick={() => void store.send(item.roomId, item.text, item.clientMessageId)}>Retry message</button></>}</article>)}
+              {room.kind === "bot" && (feed?.messages.at(-1)?.sender.id === user.id || pending.some(item => item.state === "sending")) &&
+                <p className="typing" role="status">{room.botName ?? "The assistant"} is typing…</p>}
               <div ref={end} />
             </div>
             <form className="composer" onSubmit={send}>

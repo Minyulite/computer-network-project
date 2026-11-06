@@ -327,3 +327,32 @@ test("authentication errors and keyboard forms", async ({ page, request }) => {
   const allowed = await request.get(`${api}/auth/me`, { headers: { Origin: origin } });
   expect(allowed.status()).toBe(401); // No browser cookie in this separate request context.
 });
+
+test("shop assistant: owner configures it and a customer chats with it privately", async ({ browser }) => {
+  const ownerContext = await browser.newContext(), customerContext = await browser.newContext();
+  const owner = await ownerContext.newPage(), customer = await customerContext.newPage();
+  try {
+    await signup(owner, "shopowner"); await signup(customer, "shopper");
+    await owner.getByRole("button", { name: /Manage my assistants/ }).click();
+    await owner.getByRole("button", { name: "New assistant" }).click();
+    await owner.getByLabel("Name", { exact: true }).fill("Corner Cafe");
+    await owner.getByLabel("What is your shop about?").fill("A small coffee shop near the station.");
+    await owner.getByRole("button", { name: "Add template" }).click();
+    await owner.getByLabel("Question", { exact: true }).fill("What time do you open?");
+    await owner.getByLabel("Answer", { exact: true }).fill("10.00");
+    await owner.getByRole("button", { name: "Save assistant" }).click();
+    await expect(owner.getByText("Live", { exact: true })).toBeVisible();
+
+    // Everyone can find it, without seeing how it is configured.
+    await customer.getByRole("button", { name: /Corner Cafe/ }).click();
+    await expect(customer.getByRole("heading", { name: "Corner Cafe", exact: true })).toBeVisible();
+    await send(customer, "What time do you open?");
+    // Tests run without a Gemini key, so the assistant apologises instead of guessing.
+    await expect(customer.getByRole("log")).toContainText("temporarily unavailable");
+
+    // The owner never sees the customer's conversation.
+    await owner.getByRole("button", { name: "Back to chats" }).click();
+    await expect(owner.getByText("What time do you open?", { exact: true })).toHaveCount(0);
+    await expect(owner.locator(".room-row.selected")).toHaveCount(0);
+  } finally { await ownerContext.close(); await customerContext.close(); }
+});
