@@ -33,7 +33,7 @@ export type Feed = {
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "expired";
 export type ChatState = {
   status: ConnectionStatus; syncing: boolean; error: string; rooms: Room[]; groups: Group[]; bots: Bot[]; myBots: Bot[];
-  online: User[]; known: Record<string, User>; members: Record<string, Member[]>;
+  online: User[]; people: User[]; known: Record<string, User>; members: Record<string, Member[]>;
   selected: string | null; feeds: Record<string, Feed>; pending: PendingMessage[];
 };
 export type ServerEvent =

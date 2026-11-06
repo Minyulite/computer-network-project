@@ -33,6 +33,7 @@ type ChatService interface {
 	OwnRooms(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Room], error)
 	Groups(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Group], error)
 	GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options chat.PageOptions) (chat.Page[chat.GroupMember], error)
+	People(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Person], error)
 	OpenDirect(ctx context.Context, caller auth.Identity, otherUserID string) (chat.Room, bool, error)
 	CreateGroup(ctx context.Context, caller auth.Identity, name string) (chat.Room, error)
 	JoinGroup(ctx context.Context, caller auth.Identity, roomID string) (chat.JoinResult, error)

@@ -167,8 +167,8 @@ function ChatWorkspace({ user }: { user: User }) {
     seen.add(peer.id);
     rows.push({ kind: "person", key: item.id, name: peer.username, user: peer, roomId: item.id, online: online.has(peer.id), last: lastOf(item) });
   }
-  for (const person of state.online) {
-    if (person.id !== user.id && !seen.has(person.id)) rows.push({ kind: "person", key: `user-${person.id}`, name: person.username, user: person, online: true, last: null });
+  for (const person of state.people) {
+    if (person.id !== user.id && !seen.has(person.id)) rows.push({ kind: "person", key: `user-${person.id}`, name: person.username, user: person, online: online.has(person.id), last: null });
   }
   for (const bot of state.bots) {
     const botRoom = state.rooms.find(item => item.kind === "bot" && item.botId === bot.id);
@@ -179,8 +179,8 @@ function ChatWorkspace({ user }: { user: User }) {
     rows.push({ kind: "group", key: item.id, name: item.name, group: item, joined: !!groupRoom, last: lastOf(groupRoom) });
   }
   const shownKinds = view === "all" ? ["person", "shop", "group"] : view === "people" ? ["person"] : view === "groups" ? ["group"] : ["shop"];
-  // Groups the user has not joined only show up on the Groups tab, in their own section.
-  const shown = rows.filter(row => shownKinds.includes(row.kind) && !(view === "all" && row.kind === "group" && !row.joined) && row.name.toLowerCase().includes(filter.toLowerCase()))
+  // All chats lists only conversations that exist. People, shops and open groups you have not talked to live on their own tabs.
+  const shown = rows.filter(row => shownKinds.includes(row.kind) && (view !== "all" || (row.kind === "group" ? row.joined : !!row.roomId)) && row.name.toLowerCase().includes(filter.toLowerCase()))
     .sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || lastTime(b) - lastTime(a) ||
       Number(b.kind === "person" && b.online) - Number(a.kind === "person" && a.online) || a.name.localeCompare(b.name));
 
@@ -287,7 +287,7 @@ function ChatWorkspace({ user }: { user: User }) {
             {shown.length > 0 && state.myBots.length > 0 && !filter && <h2 className="list-section">All shops</h2>}
             {shown.map(renderRow)}
           </> : shown.map(renderRow)}
-          {shown.length === 0 && <p className="empty-note">{filter ? "Nothing matches your search" : connected ? "No one is here yet. Create a group, or wait for people to come online" : "Waiting for connection…"}</p>}
+          {shown.length === 0 && !(view === "shops" && state.myBots.length > 0 && !filter) && <p className="empty-note">{filter ? "Nothing matches your search" : !connected ? "Waiting for connection…" : view === "shops" ? "No shops yet. Add the first one with the + button" : view === "groups" ? "No groups yet. Create one with the button above" : view === "people" ? "No one else has signed up yet" : "Nothing here yet. Start a chat, join a group or open a shop"}</p>}
         </div>
       </aside>
 

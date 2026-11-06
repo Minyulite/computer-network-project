@@ -31,7 +31,7 @@ export class ChatStore {
   private dirtyMembers = new Set<string>();
 
   constructor(readonly user: User) {
-    this.state = { status: "connecting", syncing: true, error: "", rooms: [], groups: [], bots: [], myBots: [], online: [],
+    this.state = { status: "connecting", syncing: true, error: "", rooms: [], groups: [], bots: [], myBots: [], online: [], people: [],
       known: { [user.id]: user }, members: {}, selected: null, feeds: {}, pending: [] };
     this.socket = new ChatSocket(user.id, status => {
       if (status !== "connected") {
@@ -41,7 +41,7 @@ export class ChatStore {
         this.historyTasks.clear(); this.memberTasks.clear(); this.dirtyMembers.clear();
       }
       if (status === "expired") {
-        this.patch({ status, rooms: [], groups: [], bots: [], myBots: [], online: [], feeds: {}, members: {}, pending: [], selected: null, known: {}, syncing: false });
+        this.patch({ status, rooms: [], groups: [], bots: [], myBots: [], online: [], people: [], feeds: {}, members: {}, pending: [], selected: null, known: {}, syncing: false });
       } else this.patch({ status, ...(status !== "connected" ? { syncing: false } : {}) });
     }, event => this.receive(event), error => this.patch({ error }));
   }
@@ -75,7 +75,7 @@ export class ChatStore {
       case "presence.changed": {
         const user = { id: event.payload.userId, username: event.payload.username, avatar: event.payload.avatar };
         this.remember([user]);
-        this.patch({ online: event.payload.online ? upsert(this.state.online, user) : this.state.online.filter(item => item.id !== user.id) });
+        this.patch({ people: upsert(this.state.people, user), online: event.payload.online ? upsert(this.state.online, user) : this.state.online.filter(item => item.id !== user.id) });
         break;
       }
       case "group.created":
@@ -159,14 +159,16 @@ export class ChatStore {
     const task = (async () => {
       try {
         const online = await this.pages<User>("users.list", generation);
+        const people = await this.pages<User>("users.all", generation);
         const groups = await this.pages<Group>("groups.list", generation);
         const bots = await this.pages<Bot>("bots.list", generation);
         const rooms = await this.pages<Room>("rooms.list", generation);
         const mine = await this.read<{ bots: Bot[] }>("bots.mine");
         if (generation !== this.generation) return;
         this.remember(online);
+        this.remember(people);
         this.remember(rooms.flatMap(room => room.direct ?? []));
-        this.patch({ online, groups, bots, rooms, myBots: mine.bots, members: {} });
+        this.patch({ online, people, groups, bots, rooms, myBots: mine.bots, members: {} });
       } catch (e) {
         if (generation === this.generation) this.patch({ error: `Could not refresh conversations. ${errorText(e)}` });
       } finally {

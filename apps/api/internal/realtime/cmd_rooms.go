@@ -37,6 +37,10 @@ func (h *Hub) usersList(_ request, p pageRequest) (any, error) {
 	return h.onlinePage(p.Limit, p.Cursor)
 }
 
+func (h *Hub) usersAll(r request, p pageRequest) (any, error) {
+	return h.chat.People(r.ctx, r.identity, p.options())
+}
+
 func (h *Hub) roomsList(r request, p pageRequest) (any, error) {
 	return h.chat.OwnRooms(r.ctx, r.identity, p.options())
 }

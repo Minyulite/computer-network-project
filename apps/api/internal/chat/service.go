@@ -296,6 +296,29 @@ func (s *Service) Groups(ctx context.Context, caller auth.Identity, options Page
 		func(r store.RoomRecord) Group { return groupValue(r, previews[r.ID]) }), nil
 }
 
+// Person is an account anyone can start a private chat with.
+type Person struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+}
+
+func (s *Service) People(ctx context.Context, caller auth.Identity, options PageOptions) (Page[Person], error) {
+	if _, err := callerID(caller); err != nil {
+		return Page[Person]{}, err
+	}
+	options, err := pageOptions(options)
+	if err != nil {
+		return Page[Person]{}, err
+	}
+	records, err := s.db.People(ctx, options.Cursor, options.Limit+1)
+	if err != nil {
+		return Page[Person]{}, err
+	}
+	return paginate(records, options.Limit, func(r store.UserRecord) string { return r.ID },
+		func(r store.UserRecord) Person { return Person{ID: r.ID, Username: r.Username, Avatar: r.Avatar} }), nil
+}
+
 func (s *Service) GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options PageOptions) (Page[GroupMember], error) {
 	if _, err := callerID(caller); err != nil {
 		return Page[GroupMember]{}, err

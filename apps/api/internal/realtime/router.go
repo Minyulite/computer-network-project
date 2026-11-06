@@ -39,6 +39,7 @@ var (
 
 var routes = map[string]route{
 	"users.list":      {handle: handle((*Hub).usersList)},
+	"users.all":       {handle: handle((*Hub).usersAll)},
 	"rooms.list":      {handle: handle((*Hub).roomsList)},
 	"groups.list":     {handle: handle((*Hub).groupsList)},
 	"groups.members":  {handle: handle((*Hub).groupMembers)},

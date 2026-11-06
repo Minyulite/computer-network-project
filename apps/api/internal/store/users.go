@@ -160,3 +160,29 @@ func mapUserWriteError(err error) error {
 	}
 	return err
 }
+
+// People lists every real account (shop assistants excluded) in ID order.
+func (db *DB) People(parent context.Context, cursor string, limit int) ([]UserRecord, error) {
+	ctx, cancel := operationContext(parent)
+	defer cancel()
+	var after any
+	if cursor != "" {
+		after = cursor
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT id, username, avatar, created_at FROM users
+		WHERE NOT is_bot AND ($1::uuid IS NULL OR id > $1::uuid)
+		ORDER BY id LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []UserRecord
+	for rows.Next() {
+		var user UserRecord
+		if err := rows.Scan(&user.ID, &user.Username, &user.Avatar, &user.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
