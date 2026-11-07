@@ -15,6 +15,7 @@ var ErrUsernameTaken = errors.New("username already exists")
 type UserRecord struct {
 	ID           string
 	Username     string
+	Avatar       string
 	PasswordHash string
 	CreatedAt    time.Time
 }
@@ -33,8 +34,8 @@ func (db *DB) UserByUsername(parent context.Context, username string) (UserRecor
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var user UserRecord
-	err := db.Pool.QueryRow(ctx, `SELECT id, username, password_hash, created_at FROM users WHERE lower(username) = lower($1) AND NOT is_bot`, username).
-		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	err := db.Pool.QueryRow(ctx, `SELECT id, username, avatar, password_hash, created_at FROM users WHERE lower(username) = lower($1) AND NOT is_bot`, username).
+		Scan(&user.ID, &user.Username, &user.Avatar, &user.PasswordHash, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UserRecord{}, ErrNotFound
 	}
@@ -45,10 +46,10 @@ func (db *DB) SessionByDigest(parent context.Context, digest []byte) (SessionRec
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var session SessionRecord
-	err := db.Pool.QueryRow(ctx, `SELECT s.id, s.expires_at, u.id, u.username, u.created_at
+	err := db.Pool.QueryRow(ctx, `SELECT s.id, s.expires_at, u.id, u.username, u.avatar, u.created_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`, digest).
-		Scan(&session.ID, &session.ExpiresAt, &session.User.ID, &session.User.Username, &session.User.CreatedAt)
+		Scan(&session.ID, &session.ExpiresAt, &session.User.ID, &session.User.Username, &session.User.Avatar, &session.User.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionRecord{}, ErrNotFound
 	}
@@ -59,10 +60,10 @@ func (db *DB) SessionByID(parent context.Context, id string) (SessionRecord, err
 	ctx, cancel := operationContext(parent)
 	defer cancel()
 	var session SessionRecord
-	err := db.Pool.QueryRow(ctx, `SELECT s.id, s.expires_at, u.id, u.username, u.created_at
+	err := db.Pool.QueryRow(ctx, `SELECT s.id, s.expires_at, u.id, u.username, u.avatar, u.created_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`, id).
-		Scan(&session.ID, &session.ExpiresAt, &session.User.ID, &session.User.Username, &session.User.CreatedAt)
+		Scan(&session.ID, &session.ExpiresAt, &session.User.ID, &session.User.Username, &session.User.Avatar, &session.User.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionRecord{}, ErrNotFound
 	}
@@ -85,8 +86,8 @@ func (db *DB) CreateAccountSession(parent context.Context, user UserRecord, sess
 		return UserRecord{}, "", err
 	}
 	defer tx.Rollback(context.Background())
-	err = tx.QueryRow(ctx, `INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3) RETURNING created_at`,
-		user.ID, user.Username, user.PasswordHash).Scan(&user.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO users (id, username, avatar, password_hash) VALUES ($1, $2, $3, $4) RETURNING created_at`,
+		user.ID, user.Username, user.Avatar, user.PasswordHash).Scan(&user.CreatedAt)
 	if err != nil {
 		return UserRecord{}, "", mapUserWriteError(err)
 	}
@@ -158,4 +159,30 @@ func mapUserWriteError(err error) error {
 		return ErrUsernameTaken
 	}
 	return err
+}
+
+// People lists every real account (shop assistants excluded) in ID order.
+func (db *DB) People(parent context.Context, cursor string, limit int) ([]UserRecord, error) {
+	ctx, cancel := operationContext(parent)
+	defer cancel()
+	var after any
+	if cursor != "" {
+		after = cursor
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT id, username, avatar, created_at FROM users
+		WHERE NOT is_bot AND ($1::uuid IS NULL OR id > $1::uuid)
+		ORDER BY id LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []UserRecord
+	for rows.Next() {
+		var user UserRecord
+		if err := rows.Scan(&user.ID, &user.Username, &user.Avatar, &user.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
 }

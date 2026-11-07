@@ -18,6 +18,7 @@ type MessageRecord struct {
 	RoomID          string
 	SenderID        string
 	SenderUsername  string
+	SenderAvatar    string
 	ClientMessageID string
 	Seq             int64
 	Text            string
@@ -44,7 +45,7 @@ func scanMessage(row pgx.Row) (MessageRecord, error) {
 func scanHistoryMessage(row pgx.Row) (MessageRecord, error) {
 	var message MessageRecord
 	err := row.Scan(&message.ID, &message.RoomID, &message.SenderID, &message.ClientMessageID,
-		&message.Seq, &message.Text, &message.CreatedAt, &message.SenderUsername)
+		&message.Seq, &message.Text, &message.CreatedAt, &message.SenderUsername, &message.SenderAvatar)
 	return message, err
 }
 
@@ -164,7 +165,7 @@ func (db *DB) History(parent context.Context, roomID, userID string, limit int,
 	if afterSeq != nil {
 		order = "ASC"
 	}
-	rows, err := tx.Query(ctx, `SELECT `+messageColumns+`, u.username FROM messages m
+	rows, err := tx.Query(ctx, `SELECT `+messageColumns+`, u.username, u.avatar FROM messages m
 		JOIN users u ON u.id = m.sender_id
 		WHERE m.room_id = $1 AND m.seq > $2 AND m.seq <= $3
 		AND ($4::bigint IS NULL OR m.seq < $4::bigint)

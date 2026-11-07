@@ -3,31 +3,10 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
+import { AvatarPicker } from "@/components/avatar";
 import { Brand, EyeIcon, EyeOffIcon } from "@/components/icons";
 import { authRequest, errorText } from "@/lib/api";
-
-// What a group looks like once you are in: the same parts the app renders.
-const preview = [
-  { from: "mali", time: "7:02 PM", text: "Did anyone capture the handshake for lab 3?" },
-  { from: "ton", time: "7:04 PM", text: "I have it. SYN, SYN-ACK, ACK in the first three frames" },
-  { from: "You", time: "7:05 PM", text: "Can you post the file here? I'll write up the timing part", own: true },
-];
-
-function ConversationPreview() {
-  return <figure className="preview" aria-hidden>
-    <div className="preview-head">
-      <span className="room-symbol">#</span>
-      <span><strong>Network study</strong><small>3 members</small></span>
-      <span className="preview-online"><i className="presence" />2 online</span>
-    </div>
-    <div className="preview-body">
-      {preview.map(message => <div className={`message ${message.own ? "own" : ""}`} key={message.time}>
-        <div className="message-meta"><strong>{message.from}</strong><time>{message.time}</time></div>
-        <p>{message.text}</p>
-      </div>)}
-    </div>
-  </figure>;
-}
+import { personAvatars } from "@/lib/avatars";
 
 // The toggle sits beside the label, not inside it, so the input keeps the plain label as its name.
 function PasswordField({ label, name, autoComplete, help }: { label: string; name: string; autoComplete: string; help?: string }) {
@@ -49,6 +28,7 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [avatar, setAvatar] = useState(""); // Empty lets the server choose one.
   useEffect(() => {
     let active = true;
     void authRequest("/auth/me").then(() => { if (active) router.replace("/"); }).catch(() => {});
@@ -69,26 +49,18 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
     }
     if (signup && password !== data.get("confirm")) { setError("Your passwords do not match."); return; }
     setBusy(true); setError("");
-    try { await authRequest(`/auth/${signup ? "signup" : "login"}`, { username, password }); router.replace("/"); }
+    try { await authRequest(`/auth/${signup ? "signup" : "login"}`, { username, password, ...(signup && avatar ? { avatar } : {}) }); router.replace("/"); }
     catch (e) { setError(errorText(e)); setBusy(false); }
   }
 
   return <main className="auth-shell">
-    <div className="auth-story">
+    <section className="auth-card" aria-labelledby="auth-title">
       <Brand href="/" />
-      <div className="auth-story-copy">
-        <h1>Private chats and open groups for everyone on your network</h1>
-        <p>Talk one to one, join a group to follow what it is working on, or ask a shop&apos;s assistant a question. Your conversations follow you to every device.</p>
-      </div>
-      <ConversationPreview />
-    </div>
-    <section className="auth-panel" aria-labelledby="auth-title">
-      <h2 id="auth-title">{signup ? "Create your account" : "Sign in to Commonroom"}</h2>
-      <p className="muted">{signup ? "Pick the username people will see in your chats" : "Use the username and password you signed up with"}</p>
+      <h1 id="auth-title">{signup ? "Create your account" : "Sign in to Commonroom"}</h1>
       <form onSubmit={submit} className="stack">
+        {signup && <AvatarPicker ids={personAvatars} name="avatar" label="Choose an avatar (optional)" value={avatar} onChange={setAvatar} />}
         <div className="field">
-          <label>Username<input name="username" autoComplete="username" required spellCheck={false} aria-describedby="username-help" /></label>
-          <span id="username-help" className="field-help">English letters, 3–24 characters. Numbers and symbols are optional</span>
+          <label>Username<input name="username" autoComplete="username" required spellCheck={false} /></label>
         </div>
         <PasswordField label="Password" name="password" autoComplete={signup ? "new-password" : "current-password"}
           help={signup ? "At least 8 characters" : undefined} />

@@ -97,11 +97,12 @@ export function GrammarTextarea({ id, value, onChange, correct, canCorrect, onCo
       if (!panelRef.current?.contains(event.target as Node)) close();
     };
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    // Only movement of the box or page detaches the panel. Other scrolling must
-    // not close it: the message list scrolls by itself on every incoming
-    // message, and the panel's own diff can scroll too.
+    // Only movement of the page detaches the panel, which is anchored to the click
+    // point. Other scrolling must not close it: the message list scrolls by itself
+    // on every incoming message, the panel's own diff can scroll, and the draft box
+    // scrolls by itself as its text changes, sometimes just after the menu opens.
     const onScroll = (event: Event) => {
-      if (event.target === textarea.current || event.target === document) close();
+      if (event.target === document) close();
     };
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeyDown);

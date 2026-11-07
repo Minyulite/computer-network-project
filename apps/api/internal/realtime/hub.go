@@ -33,6 +33,7 @@ type ChatService interface {
 	OwnRooms(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Room], error)
 	Groups(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Group], error)
 	GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options chat.PageOptions) (chat.Page[chat.GroupMember], error)
+	People(ctx context.Context, caller auth.Identity, options chat.PageOptions) (chat.Page[chat.Person], error)
 	OpenDirect(ctx context.Context, caller auth.Identity, otherUserID string) (chat.Room, bool, error)
 	CreateGroup(ctx context.Context, caller auth.Identity, name string) (chat.Room, error)
 	JoinGroup(ctx context.Context, caller auth.Identity, roomID string) (chat.JoinResult, error)
@@ -226,7 +227,7 @@ func (h *Hub) addClient(c *client) error {
 	h.clients.Add(1)
 	h.enqueue(c, wire(eventSessionReady, "", map[string]any{"user": identity.User, "connectionId": c.id, "serverInstanceId": h.instanceID}))
 	if first {
-		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": identity.User.ID, "username": identity.User.Username, "online": true})
+		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": identity.User.ID, "username": identity.User.Username, "avatar": identity.User.Avatar, "online": true})
 	}
 	return nil
 }
@@ -248,7 +249,7 @@ func (h *Hub) removeClient(c *client, code websocket.StatusCode, reason string) 
 	}
 	c.close(code, reason)
 	if last {
-		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": c.identity.User.ID, "username": c.identity.User.Username, "online": false})
+		h.broadcastAll(eventPresenceChanged, map[string]any{"userId": c.identity.User.ID, "username": c.identity.User.Username, "avatar": c.identity.User.Avatar, "online": false})
 	}
 }
 
@@ -282,6 +283,7 @@ func (h *Hub) broadcastUsers(ids []string, typ string, payload any) {
 type onlineUser struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
 }
 
 func (h *Hub) onlinePage(limit int, cursor string) (chat.Page[onlineUser], error) {
@@ -304,7 +306,7 @@ func (h *Hub) onlinePage(limit int, cursor string) (chat.Page[onlineUser], error
 	page := chat.Page[onlineUser]{Items: make([]onlineUser, 0, min(limit, len(ids)))}
 	for _, userID := range ids[:min(limit, len(ids))] {
 		for _, c := range h.byUser[userID] {
-			page.Items = append(page.Items, onlineUser{userID, c.identity.User.Username})
+			page.Items = append(page.Items, onlineUser{userID, c.identity.User.Username, c.identity.User.Avatar})
 			break
 		}
 	}

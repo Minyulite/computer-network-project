@@ -22,6 +22,7 @@ const authBodyLimit = 8 * 1024
 type credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Avatar   string `json:"avatar"` // Sign-up only: the chosen cartoon picture.
 }
 
 func readCredentials(w http.ResponseWriter, r *http.Request) (credentials, bool) {
@@ -52,7 +53,7 @@ func signupHandler(service *auth.Service, cfg config.Config) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		result, err := service.Signup(r.Context(), value.Username, value.Password, remoteIP(r), cookieToken(r))
+		result, err := service.Signup(r.Context(), value.Username, value.Password, value.Avatar, remoteIP(r), cookieToken(r))
 		if err != nil {
 			authError(w, err)
 			return

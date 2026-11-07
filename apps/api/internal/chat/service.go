@@ -12,6 +12,7 @@ import (
 const (
 	maxGroupName       = 64
 	maxMessageRunes    = 2000
+	maxPreviewRunes    = 120 // The list only shows one line of the newest message.
 	defaultHistorySize = 50
 	maxHistorySize     = 100
 )
@@ -25,23 +26,38 @@ func roomValue(record store.RoomRecord, joinedSeq int64) Room {
 	if record.Kind == RoomGroup {
 		start = joinedSeq + 1
 	}
-	return Room{ID: record.ID, Kind: record.Kind, Name: record.Name, CreatedBy: record.CreatedBy,
+	room := Room{ID: record.ID, Kind: record.Kind, Name: record.Name, CreatedBy: record.CreatedBy,
 		DirectUserLow: record.DirectUserLow, DirectUserHigh: record.DirectUserHigh,
 		LatestSeq: record.LastSeq, HistoryStartSeq: start, CreatedAt: record.CreatedAt,
-		BotID: record.BotID, BotName: record.BotName}
+		BotID: record.BotID, BotName: record.BotName, BotAvatar: record.BotAvatar}
+	if record.Kind == RoomDirect {
+		room.Direct = []UserSummary{
+			{ID: record.DirectUserLow, Username: record.DirectLowName, Avatar: record.DirectLowAvatar},
+			{ID: record.DirectUserHigh, Username: record.DirectHighName, Avatar: record.DirectHighAvatar}}
+	}
+	return room
 }
 
-func groupValue(record store.RoomRecord) Group {
-	return Group{ID: record.ID, Name: record.Name, CreatedBy: record.CreatedBy, CreatedAt: record.CreatedAt}
+func summaryValue(record store.MemberRecord) UserSummary {
+	return UserSummary{ID: record.UserID, Username: record.Username, Avatar: record.Avatar}
+}
+
+func groupValue(record store.RoomRecord, preview []store.MemberRecord) Group {
+	group := Group{ID: record.ID, Name: record.Name, CreatedBy: record.CreatedBy, CreatedAt: record.CreatedAt,
+		Preview: make([]UserSummary, 0, len(preview))}
+	for _, member := range preview {
+		group.Preview = append(group.Preview, summaryValue(member))
+	}
+	return group
 }
 
 func memberValue(record store.MemberRecord) GroupMember {
-	return GroupMember{User: UserSummary{ID: record.UserID, Username: record.Username}, JoinedAt: record.JoinedAt}
+	return GroupMember{User: summaryValue(record), JoinedAt: record.JoinedAt}
 }
 
-func messageValue(record store.MessageRecord, username string) Message {
+func messageValue(record store.MessageRecord, username, avatar string) Message {
 	return Message{ID: record.ID, RoomID: record.RoomID,
-		Sender:          UserSummary{ID: record.SenderID, Username: username},
+		Sender:          UserSummary{ID: record.SenderID, Username: username, Avatar: avatar},
 		ClientMessageID: record.ClientMessageID, Seq: record.Seq, Text: record.Text, SentAt: record.CreatedAt}
 }
 
@@ -79,8 +95,8 @@ func (s *Service) storeMessage(ctx context.Context, record store.MessageRecord) 
 }
 
 // sendResult wraps a stored message and, for a new one, who should receive it.
-func (s *Service) sendResult(ctx context.Context, kind string, record store.MessageRecord, username string, created bool) (SendResult, error) {
-	result := SendResult{RoomKind: kind, Message: messageValue(record, username), Created: created}
+func (s *Service) sendResult(ctx context.Context, kind string, record store.MessageRecord, username, avatar string, created bool) (SendResult, error) {
+	result := SendResult{RoomKind: kind, Message: messageValue(record, username, avatar), Created: created}
 	if created {
 		var err error
 		result.RecipientUserIDs, err = s.db.EligibleMemberIDs(ctx, record.RoomID, record.Seq)
@@ -204,7 +220,7 @@ func (s *Service) SendMessage(ctx context.Context, caller auth.Identity,
 	if record.RoomID != roomID || record.Text != text {
 		return SendResult{}, ErrIdempotencyConflict
 	}
-	return s.sendResult(ctx, room.Kind, record, caller.User.Username, created)
+	return s.sendResult(ctx, room.Kind, record, caller.User.Username, caller.User.Avatar, created)
 }
 
 func (s *Service) History(ctx context.Context, caller auth.Identity, roomID string, options HistoryOptions) (HistoryPage, error) {
@@ -235,7 +251,7 @@ func (s *Service) History(ctx context.Context, caller auth.Identity, roomID stri
 		HistoryStartSeq: roomValue(record.Room, record.JoinedSeq).HistoryStartSeq,
 		UpToSeq:         record.UpToSeq, HasMore: record.HasMore}
 	for _, message := range record.Messages {
-		page.Messages = append(page.Messages, messageValue(message, message.SenderUsername))
+		page.Messages = append(page.Messages, messageValue(message, message.SenderUsername, message.SenderAvatar))
 	}
 	page.SetContinuation(options.AfterSeq != nil)
 	return page, nil
@@ -266,7 +282,41 @@ func (s *Service) Groups(ctx context.Context, caller auth.Identity, options Page
 	if err != nil {
 		return Page[Group]{}, err
 	}
-	return paginate(records, options.Limit, func(r store.RoomRecord) string { return r.ID }, groupValue), nil
+	// Previews are fetched once for the groups on this page, not once per group.
+	shown, _ := trimPage(records, options.Limit, func(r store.RoomRecord) string { return r.ID })
+	ids := make([]string, 0, len(shown))
+	for _, record := range shown {
+		ids = append(ids, record.ID)
+	}
+	previews, err := s.db.GroupPreviews(ctx, ids)
+	if err != nil {
+		return Page[Group]{}, err
+	}
+	return paginate(records, options.Limit, func(r store.RoomRecord) string { return r.ID },
+		func(r store.RoomRecord) Group { return groupValue(r, previews[r.ID]) }), nil
+}
+
+// Person is an account anyone can start a private chat with.
+type Person struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+}
+
+func (s *Service) People(ctx context.Context, caller auth.Identity, options PageOptions) (Page[Person], error) {
+	if _, err := callerID(caller); err != nil {
+		return Page[Person]{}, err
+	}
+	options, err := pageOptions(options)
+	if err != nil {
+		return Page[Person]{}, err
+	}
+	records, err := s.db.People(ctx, options.Cursor, options.Limit+1)
+	if err != nil {
+		return Page[Person]{}, err
+	}
+	return paginate(records, options.Limit, func(r store.UserRecord) string { return r.ID },
+		func(r store.UserRecord) Person { return Person{ID: r.ID, Username: r.Username, Avatar: r.Avatar} }), nil
 }
 
 func (s *Service) GroupMembers(ctx context.Context, caller auth.Identity, roomID string, options PageOptions) (Page[GroupMember], error) {
@@ -315,9 +365,14 @@ func (s *Service) OwnRooms(ctx context.Context, caller auth.Identity, options Pa
 	records, next := trimPage(records, options.Limit, func(r store.OwnRoomRecord) string { return r.Room.ID })
 	page := Page[Room]{Items: make([]Room, 0, len(records)), NextCursor: next}
 	for _, record := range records {
-		if canSee(record.Room, userID) {
-			page.Items = append(page.Items, roomValue(record.Room, record.JoinedSeq))
+		if !canSee(record.Room, userID) {
+			continue
 		}
+		room := roomValue(record.Room, record.JoinedSeq)
+		if last := record.Last; last != nil {
+			room.Last = &LastMessage{SenderID: last.SenderID, SenderName: last.SenderName, Text: clipRunes(last.Text, maxPreviewRunes), SentAt: last.CreatedAt}
+		}
+		page.Items = append(page.Items, room)
 	}
 	return page, nil
 }

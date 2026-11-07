@@ -118,7 +118,7 @@ func newRigFull(t *testing.T, corrector GrammarCorrector, makeBots func(*chat.Se
 
 func (r *testRig) signup(t *testing.T, name string) testAccount {
 	t.Helper()
-	result, err := r.auth.Signup(context.Background(), name, "fifteen characters", name, "")
+	result, err := r.auth.Signup(context.Background(), name, "fifteen characters", "", name, "")
 	if err != nil {
 		t.Fatal(err)
 	}

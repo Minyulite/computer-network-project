@@ -9,6 +9,10 @@ import pg from "pg";
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(web, "../..");
+// Ports can be moved when the defaults are taken: E2E_API_PORT, E2E_WEB_PORT, E2E_CONTROL_PORT.
+const apiPort = process.env.E2E_API_PORT ?? "18080";
+const webPort = process.env.E2E_WEB_PORT ?? "13000";
+const controlPort = process.env.E2E_CONTROL_PORT ?? "18081";
 const raw = process.env.TEST_DATABASE_URL;
 if (!raw || !/test/i.test(new URL(raw).pathname) || raw === process.env.DATABASE_URL) {
   throw new Error("Set TEST_DATABASE_URL to a dedicated test database (name must contain 'test'). Never use the application database.");
@@ -19,9 +23,9 @@ db.on("error", () => {}); // Idle connections can close during the intentional r
 const scoped = new URL(raw);
 scoped.searchParams.set("search_path", schema);
 const controlKey = randomBytes(24).toString("hex");
-const env = { ...process.env, DATABASE_URL: scoped.href, HOST: "127.0.0.1", PORT: "18080",
-  ALLOWED_ORIGINS: "http://127.0.0.1:13000", COOKIE_SECURE: "false",
-  NEXT_PUBLIC_API_URL: "http://127.0.0.1:18080", NEXT_PUBLIC_WS_URL: "ws://127.0.0.1:18080/ws",
+const env = { ...process.env, DATABASE_URL: scoped.href, HOST: "127.0.0.1", PORT: apiPort,
+  ALLOWED_ORIGINS: `http://127.0.0.1:${webPort}`, COOKIE_SECURE: "false",
+  NEXT_PUBLIC_API_URL: `http://127.0.0.1:${apiPort}`, NEXT_PUBLIC_WS_URL: `ws://127.0.0.1:${apiPort}/ws`,
   E2E_DATABASE_URL: scoped.href, E2E_CONTROL_KEY: controlKey,
   GEMINI_API_KEY: "", // Tests must never spend a developer's quota or send text to Google.
 };
@@ -49,20 +53,20 @@ async function freePort(port) {
   await new Promise((resolve, reject) => {
     const server = createServer();
     server.once("error", () => reject(new Error(`Test port ${port} is in use; stop its process first.`)));
-    server.listen(port, "127.0.0.1", () => server.close(resolve));
+    server.listen(Number(port), "127.0.0.1", () => server.close(resolve));
   });
 }
 try {
-  await Promise.all([freePort(13000), freePort(18080), freePort(18081)]);
+  await Promise.all([freePort(webPort), freePort(apiPort), freePort(controlPort)]);
   await db.query(`CREATE SCHEMA ${schema}`);
   console.log(`Created isolated E2E schema ${schema}`);
   await mkdir(path.dirname(binary), { recursive: true });
   await run("go", ["build", "-o", binary, "./cmd/api"], path.join(root, "apps/api"));
   await run(process.execPath, ["node_modules/next/dist/bin/next", "build"]);
   api = start(binary, [], root);
-  await ready("http://127.0.0.1:18080/health");
-  frontend = start(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "13000"]);
-  await ready("http://127.0.0.1:13000/signin");
+  await ready(`http://127.0.0.1:${apiPort}/health`);
+  frontend = start(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", webPort]);
+  await ready(`http://127.0.0.1:${webPort}/signin`);
   // Test-only control server, loopback + random capability; never part of the app.
   control = createServer(async (req, res) => {
     if (req.method !== "POST" || req.headers.authorization !== `Bearer ${controlKey}` || req.url !== "/restart") { res.writeHead(403).end(); return; }
@@ -77,11 +81,11 @@ try {
         catch { if (attempt >= 30) throw new Error("Database did not recover"); await new Promise(resolve => setTimeout(resolve, 500)); }
       }
       api = start(binary, [], root);
-      await ready("http://127.0.0.1:18080/health");
+      await ready(`http://127.0.0.1:${apiPort}/health`);
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ postgresRestarted: process.env.E2E_RESTART_POSTGRES === "1" }));
     } catch { res.writeHead(500).end("Restart failed"); }
   });
-  await new Promise(resolve => control.listen(18081, "127.0.0.1", resolve));
+  await new Promise(resolve => control.listen(Number(controlPort), "127.0.0.1", resolve));
   await run(process.execPath, ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)]);
 } catch (error) {
   // Do not print driver errors that could include connection credentials.

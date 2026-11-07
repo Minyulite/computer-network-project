@@ -38,14 +38,18 @@ func TestBotConversationIsPrivateAndReplied(t *testing.T) {
 	bob := r.socket(t, r.signup(t, "bob"))
 	carol := r.socket(t, r.signup(t, "carol"))
 
-	send(t, alice, "mk", "bot.create", map[string]any{"name": "Cafe", "description": "A coffee shop.",
+	send(t, alice, "mk", "bot.create", map[string]any{"name": "Cafe", "avatar": "b04", "description": "A coffee shop.",
 		"templates": []map[string]string{{"question": "What time do you open?", "answer": "10.00"}}})
 	created := until(t, alice, "request.ok", "mk")
 	var detail struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Avatar string `json:"avatar"`
 	}
 	if err := json.Unmarshal(created.Payload, &detail); err != nil || detail.ID == "" {
 		t.Fatalf("create: %s %v", created.Payload, err)
+	}
+	if detail.Avatar != "b04" {
+		t.Fatalf("chosen picture was not kept: %s", created.Payload)
 	}
 	// Everyone learns about the bot, but not its description or templates.
 	broadcast := until(t, bob, "bot.upserted", "")

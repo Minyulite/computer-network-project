@@ -1,4 +1,4 @@
-export type User = { id: string; username: string };
+export type User = { id: string; username: string; avatar?: string };
 export type Session = { user: User; expiresAt: string };
 
 export class ApiError extends Error {

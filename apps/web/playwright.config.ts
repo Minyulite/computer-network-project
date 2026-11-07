@@ -4,6 +4,6 @@ export default defineConfig({
   testDir: "./e2e", fullyParallel: false, workers: 1, retries: 0,
   timeout: 180000, expect: { timeout: 15000 },
   reporter: [["list"], ["html", { open: "never" }]],
-  use: { baseURL: "http://127.0.0.1:13000", browserName: "chromium", viewport: { width: 1360, height: 900 },
+  use: { baseURL: `http://127.0.0.1:${process.env.E2E_WEB_PORT ?? "13000"}`, browserName: "chromium", viewport: { width: 1360, height: 900 },
     trace: "retain-on-failure", screenshot: "only-on-failure" },
 });

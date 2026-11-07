@@ -29,32 +29,55 @@ type RoomRecord struct {
 	CreatedAt      time.Time
 	BotID          string
 	BotName        string
+	BotAvatar      string
+	// Both people of a direct room, so a client can show who the other one is
+	// even while they are offline.
+	DirectLowName, DirectLowAvatar   string
+	DirectHighName, DirectHighAvatar string
+}
+
+// LastMessageRecord is the newest message of a room that its member may see.
+type LastMessageRecord struct {
+	SenderID   string
+	SenderName string
+	Text       string
+	CreatedAt  time.Time
 }
 
 type OwnRoomRecord struct {
 	Room      RoomRecord
 	JoinedSeq int64
+	Last      *LastMessageRecord // Nil when nothing visible to this member was sent yet.
 }
 
 type MemberRecord struct {
 	UserID    string
 	Username  string
+	Avatar    string
 	JoinedAt  time.Time
 	JoinedSeq int64
 }
 
 const roomColumns = `r.id, r.kind, r.name, r.created_by, r.direct_user_low, r.direct_user_high, r.last_seq, r.created_at,
-	r.bot_id, (SELECT b.name FROM bots b WHERE b.id = r.bot_id)`
+	r.bot_id, (SELECT b.name FROM bots b WHERE b.id = r.bot_id), (SELECT b.avatar FROM bots b WHERE b.id = r.bot_id),
+	(SELECT u.username FROM users u WHERE u.id = r.direct_user_low), (SELECT u.avatar FROM users u WHERE u.id = r.direct_user_low),
+	(SELECT u.username FROM users u WHERE u.id = r.direct_user_high), (SELECT u.avatar FROM users u WHERE u.id = r.direct_user_high)`
 
-func scanRoom(row pgx.Row) (RoomRecord, error) {
+func scanRoom(row pgx.Row) (RoomRecord, error) { return scanRoomWith(row) }
+
+// scanRoomWith reads the room columns, then any extra destinations the query appends.
+func scanRoomWith(row pgx.Row, extra ...any) (RoomRecord, error) {
 	var room RoomRecord
-	var name, low, high, botID, botName sql.NullString
-	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt, &botID, &botName)
-	if err != nil {
+	var name, low, high, botID, botName, botAvatar, lowName, lowAvatar, highName, highAvatar sql.NullString
+	dest := append([]any{&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt,
+		&botID, &botName, &botAvatar, &lowName, &lowAvatar, &highName, &highAvatar}, extra...)
+	if err := row.Scan(dest...); err != nil {
 		return RoomRecord{}, err
 	}
 	room.Name, room.DirectUserLow, room.DirectUserHigh = name.String, low.String, high.String
-	room.BotID, room.BotName = botID.String, botName.String
+	room.BotID, room.BotName, room.BotAvatar = botID.String, botName.String, botAvatar.String
+	room.DirectLowName, room.DirectLowAvatar = lowName.String, lowAvatar.String
+	room.DirectHighName, room.DirectHighAvatar = highName.String, highAvatar.String
 	return room, nil
 }
 
@@ -144,9 +167,22 @@ func (db *DB) JoinGroup(parent context.Context, roomID, userID string) (int64, b
 		return 0, false, err
 	}
 	defer tx.Rollback(context.Background())
+	joinedSeq, created, err := joinGroupTx(ctx, tx, roomID, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, false, err
+	}
+	return joinedSeq, created, nil
+}
+
+// joinGroupTx adds userID to a group inside tx. It reports the sequence the
+// member joined at and whether this call added them.
+func joinGroupTx(ctx context.Context, tx pgx.Tx, roomID, userID string) (int64, bool, error) {
 	var kind string
 	var lastSeq int64
-	err = tx.QueryRow(ctx, `SELECT kind, last_seq FROM rooms WHERE id = $1 FOR UPDATE`, roomID).Scan(&kind, &lastSeq)
+	err := tx.QueryRow(ctx, `SELECT kind, last_seq FROM rooms WHERE id = $1 FOR UPDATE`, roomID).Scan(&kind, &lastSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, ErrNotFound
 	}
@@ -165,10 +201,37 @@ func (db *DB) JoinGroup(parent context.Context, roomID, userID string) (int64, b
 	if err := tx.QueryRow(ctx, `SELECT joined_seq FROM room_members WHERE room_id = $1 AND user_id = $2`, roomID, userID).Scan(&joinedSeq); err != nil {
 		return 0, false, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, false, err
-	}
 	return joinedSeq, tag.RowsAffected() == 1, nil
+}
+
+// GroupPreviews returns up to two members per group, the first to join, for the
+// overlapping pictures shown in a conversation list.
+func (db *DB) GroupPreviews(parent context.Context, roomIDs []string) (map[string][]MemberRecord, error) {
+	previews := map[string][]MemberRecord{}
+	if len(roomIDs) == 0 {
+		return previews, nil
+	}
+	ctx, cancel := operationContext(parent)
+	defer cancel()
+	rows, err := db.Pool.Query(ctx, `SELECT room_id, user_id, username, avatar FROM (
+			SELECT m.room_id, u.id AS user_id, u.username, u.avatar,
+			       row_number() OVER (PARTITION BY m.room_id ORDER BY m.joined_at, u.id) AS n
+			FROM room_members m JOIN users u ON u.id = m.user_id
+			WHERE m.room_id::text = ANY($1::text[])) t
+		WHERE n <= 2 ORDER BY room_id, n`, roomIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var roomID string
+		var member MemberRecord
+		if err := rows.Scan(&roomID, &member.UserID, &member.Username, &member.Avatar); err != nil {
+			return nil, err
+		}
+		previews[roomID] = append(previews[roomID], member)
+	}
+	return previews, rows.Err()
 }
 
 func (db *DB) RoomByID(parent context.Context, roomID string) (RoomRecord, error) {
@@ -195,15 +258,7 @@ func (db *DB) Membership(parent context.Context, roomID, userID string) (RoomRec
 }
 
 func scanRoomWithMembership(row pgx.Row, joinedSeq *int64) (RoomRecord, error) {
-	var room RoomRecord
-	var name, low, high, botID, botName sql.NullString
-	err := row.Scan(&room.ID, &room.Kind, &name, &room.CreatedBy, &low, &high, &room.LastSeq, &room.CreatedAt, &botID, &botName, joinedSeq)
-	if err != nil {
-		return RoomRecord{}, err
-	}
-	room.Name, room.DirectUserLow, room.DirectUserHigh = name.String, low.String, high.String
-	room.BotID, room.BotName = botID.String, botName.String
-	return room, nil
+	return scanRoomWith(row, joinedSeq)
 }
 
 func (db *DB) DirectMemberIDs(parent context.Context, roomID string) ([]string, error) {
@@ -256,8 +311,13 @@ func (db *DB) Groups(parent context.Context, cursor string, limit int) ([]RoomRe
 func (db *DB) OwnRooms(parent context.Context, userID, cursor string, limit int) ([]OwnRoomRecord, error) {
 	ctx, cancel := operationContext(parent)
 	defer cancel()
-	rows, err := db.Pool.Query(ctx, `SELECT `+roomColumns+`, m.joined_seq FROM rooms r
+	// rooms.last_seq is the sequence of the newest message, so it is found by key.
+	// A group member never sees a message from before they joined.
+	rows, err := db.Pool.Query(ctx, `SELECT `+roomColumns+`, m.joined_seq, lm.text, lm.sender_id::text, lu.username, lm.created_at
+		FROM rooms r
 		JOIN room_members m ON m.room_id = r.id
+		LEFT JOIN messages lm ON lm.room_id = r.id AND lm.seq = r.last_seq AND r.last_seq > m.joined_seq
+		LEFT JOIN users lu ON lu.id = lm.sender_id
 		WHERE m.user_id = $1 AND ($2::uuid IS NULL OR r.id > $2::uuid)
 		ORDER BY r.id LIMIT $3`, userID, cursorArg(cursor), limit)
 	if err != nil {
@@ -267,11 +327,17 @@ func (db *DB) OwnRooms(parent context.Context, userID, cursor string, limit int)
 	var rooms []OwnRoomRecord
 	for rows.Next() {
 		var joinedSeq int64
-		room, err := scanRoomWithMembership(rows, &joinedSeq)
+		var text, senderID, senderName sql.NullString
+		var sentAt sql.NullTime
+		room, err := scanRoomWith(rows, &joinedSeq, &text, &senderID, &senderName, &sentAt)
 		if err != nil {
 			return nil, err
 		}
-		rooms = append(rooms, OwnRoomRecord{Room: room, JoinedSeq: joinedSeq})
+		record := OwnRoomRecord{Room: room, JoinedSeq: joinedSeq}
+		if text.Valid {
+			record.Last = &LastMessageRecord{SenderID: senderID.String, SenderName: senderName.String, Text: text.String, CreatedAt: sentAt.Time}
+		}
+		rooms = append(rooms, record)
 	}
 	return rooms, rows.Err()
 }
@@ -279,7 +345,7 @@ func (db *DB) OwnRooms(parent context.Context, userID, cursor string, limit int)
 func (db *DB) GroupMembers(parent context.Context, roomID, cursor string, limit int) ([]MemberRecord, error) {
 	ctx, cancel := operationContext(parent)
 	defer cancel()
-	rows, err := db.Pool.Query(ctx, `SELECT u.id, u.username, m.joined_at, m.joined_seq
+	rows, err := db.Pool.Query(ctx, `SELECT u.id, u.username, u.avatar, m.joined_at, m.joined_seq
 		FROM room_members m JOIN users u ON u.id = m.user_id
 		WHERE m.room_id = $1 AND ($2::uuid IS NULL OR u.id > $2::uuid)
 		ORDER BY u.id LIMIT $3`, roomID, cursorArg(cursor), limit)
@@ -290,7 +356,7 @@ func (db *DB) GroupMembers(parent context.Context, roomID, cursor string, limit 
 	var members []MemberRecord
 	for rows.Next() {
 		var member MemberRecord
-		if err := rows.Scan(&member.UserID, &member.Username, &member.JoinedAt, &member.JoinedSeq); err != nil {
+		if err := rows.Scan(&member.UserID, &member.Username, &member.Avatar, &member.JoinedAt, &member.JoinedSeq); err != nil {
 			return nil, err
 		}
 		members = append(members, member)

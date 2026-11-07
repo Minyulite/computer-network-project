@@ -37,6 +37,10 @@ func (h *Hub) usersList(_ request, p pageRequest) (any, error) {
 	return h.onlinePage(p.Limit, p.Cursor)
 }
 
+func (h *Hub) usersAll(r request, p pageRequest) (any, error) {
+	return h.chat.People(r.ctx, r.identity, p.options())
+}
+
 func (h *Hub) roomsList(r request, p pageRequest) (any, error) {
 	return h.chat.OwnRooms(r.ctx, r.identity, p.options())
 }
@@ -68,7 +72,7 @@ func (h *Hub) groupCreate(r request, p createRequest) (any, error) {
 	}
 	h.reply(r, map[string]any{"room": room})
 	h.broadcastAll(eventGroupCreated, map[string]any{
-		"group":         chat.Group{ID: room.ID, Name: room.Name, CreatedBy: room.CreatedBy, CreatedAt: room.CreatedAt},
+		"group":         chat.Group{ID: room.ID, Name: room.Name, CreatedBy: room.CreatedBy, CreatedAt: room.CreatedAt, Preview: []chat.UserSummary{userSummary(r)}},
 		"initialMember": userSummary(r),
 	})
 	h.broadcastUsers([]string{r.identity.User.ID}, eventRoomUpserted, map[string]any{"room": room})
@@ -113,5 +117,5 @@ func fitHistory(page chat.HistoryPage, forward bool, requestID string) chat.Hist
 }
 
 func userSummary(r request) chat.UserSummary {
-	return chat.UserSummary{ID: r.identity.User.ID, Username: r.identity.User.Username}
+	return chat.UserSummary{ID: r.identity.User.ID, Username: r.identity.User.Username, Avatar: r.identity.User.Avatar}
 }

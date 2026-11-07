@@ -37,3 +37,11 @@ func cleanText(value string, min, max int) (string, error) {
 	}
 	return value, nil
 }
+
+// clipRunes cuts value to at most n characters without splitting one.
+func clipRunes(value string, n int) string {
+	if utf8.RuneCountInString(value) <= n {
+		return value
+	}
+	return string([]rune(value)[:n])
+}

@@ -109,6 +109,7 @@ cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai
   - ไฟล์ SQL ต้อง LF (กำหนดใน `.gitattributes`) ไม่งั้น checksum ต่าง OS ไม่ตรง
   - ไม่ใส่ `BEGIN/COMMIT` ในไฟล์ migration (runner เป็นเจ้าของ transaction)
 - Schema: `users`, `sessions` (เก็บ **hash ของ token** 32 byte), `rooms` (`kind` = `direct|group`, `last_seq`, `direct_key` generated จากคู่ UUID ที่เรียงแล้ว), `room_members` (`joined_seq`), `messages` (`seq` ต่อห้อง, `client_message_id`) — constraint ใน DB ครอบรูปร่างข้อมูลและช่วง seq ≤ 2^53−1 (ปลอดภัยกับ JS number) ดู ER diagram ใน `store/README.md`
+- **Avatar** (migration `004_avatars.sql`): `users.avatar` / `bots.avatar` เก็บ id เช่น `p01` (คน, 12 แบบ) หรือ `b03` (บอท, 8 แบบ) — รูปจริงเป็นไฟล์ใน `apps/web/public/avatars` (ที่มา/ลิขสิทธิ์ใน `CREDITS.md`) ; ตรวจ id ที่ `internal/avatar` ; บัญชีเดิมถูก backfill ให้อัตโนมัติ
 
 ### 3.4 Pattern สำคัญด้านข้อความ
 - **ลำดับ + กันซ้ำ**: `SaveMessage` ล็อกแถวห้อง (`SELECT … FOR UPDATE`) → ตรวจ membership → หา retry จาก `(sender_id, client_message_id)` → `last_seq+1` → `INSERT` ใน transaction เดียว ถ้า insert พลาด counter rollback
@@ -150,7 +151,7 @@ cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai
 ```
 - Client→Server: ต้องมี `v=1`, `type`, `requestId` (`^[A-Za-z0-9_-]{1,64}$`), `payload` (object); ขนาด ≤ 16 KiB; ฟิลด์แปลก = ผิด (`DisallowUnknownFields`); envelope เสีย → **ปิด socket**
 - Server→Client: ตอบคำสั่งด้วย `request.ok` / `request.error` (+ `requestId` เดิม) ; เหตุการณ์ push ไม่มี requestId: `session.ready`, `presence.changed`, `group.created`, `group.member_joined`, `room.upserted`, `message.created`
-- คำสั่ง: `users.list`, `rooms.list`, `groups.list`, `groups.members`, `direct.open`, `group.create`, `group.join`, `message.send`, `room.history`, `grammar.correct`
+- คำสั่ง: `users.list`, `rooms.list`, `groups.list`, `groups.members`, `direct.open`, `group.create`, `group.join`, `message.send`, `room.history`, `grammar.correct` (+ คำสั่งบอท `bots.*`, `bot.*`)
 - response จำกัด 256 KiB — `fitHistory` ตัด history ให้พอดีแล้วตั้ง `hasMore` + cursor ต่อ
 
 **Router (`router.go`)** — ทุกคำสั่งผ่าน `handleCommand` ขั้นตอนเดียวกัน:
@@ -198,11 +199,14 @@ cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai
 |---|---|---|
 | `/` | `page.tsx` → `<ChatApp />` | |
 | `/signin`, `/signup` | `<AuthForm mode="…">` | |
-| — | `layout.tsx`, `globals.css` | CSS เดียวทั้งแอป (ไม่มี Tailwind/CSS-in-JS) |
+| — | `layout.tsx`, `globals.css`, `chat.css` | CSS ธรรมดา (ไม่มี Tailwind/CSS-in-JS) : `globals.css` = ฐาน + หน้า sign in ; `chat.css` = หน้า chat ทั้งหมด พร้อม design token ชุดใหม่ที่ประกาศใน `.workspace` (rail เข้ม / พื้นลาเวนเดอร์ / accent indigo / ฟอนต์ Poppins) |
 
 ทุก component เป็น **client component** (`"use client"`) ; ไม่มี server component ที่ fetch API
 
 ### 4.2 Components (`src/components`)
+- **`avatar.tsx`** — `Avatar` (รูปการ์ตูนกลม + จุดเขียวเมื่อออนไลน์ / ป้ายบอท), `GroupAvatar` (รูปสมาชิก 2 คนซ้อนกันแบบ Facebook), `AvatarPicker` (ใช้ `<input type="radio">` จริง จึงเลื่อนด้วยลูกศรได้และไปกับ FormData) ; id → ไฟล์ที่ `lib/avatars.ts` (บัญชีเก่าที่ไม่มี avatar ได้รูปคงที่จากการ hash ของ id)
+- **`chat-app.tsx`** — รายการแชตเดียวรวมคน / ร้านค้า / กลุ่ม (คนที่ออนไลน์มีจุดเขียว, ร้านค้ามีป้ายบอท, กลุ่มเป็นรูปซ้อน) กรองด้วยแถบ rail ; ปุ่ม "New group" ข้างช่องค้นหาเปิด dialog สร้างกลุ่ม (ตั้งชื่ออย่างเดียว) ; กล่องข้อความไม่มีข้อความเสริมใต้กล่อง (ปุ่มแปลงภาษาและปุ่มส่งอยู่ในกล่อง)
+- สไตล์ของหน้า chat อยู่ที่ `app/chat.css` (token ชุดใหม่ใน `.workspace`)
 - **`chat-app.tsx`** — `ChatApp` เรียก `GET /auth/me` : 401 → `router.replace("/signin")`, สำเร็จ → `<ChatWorkspace key={user.id}>` (key = user id เพื่อทำลาย store เมื่อสลับบัญชี). `ChatWorkspace` สร้าง `ChatStore` ครั้งเดียว (`useState(() => new ChatStore(user))`), `store.start()/stop()` ใน `useEffect`, อ่าน state ด้วย `useSyncExternalStore`
   - draft ของแต่ละห้องเก็บใน `drafts: Record<roomId, string>` (state ของ component, หายเมื่อ refresh)
   - `action(fn)` ครอบ async action: set `busy`, จับ error แสดง `actionError`
@@ -260,7 +264,7 @@ cmd/api → httpapi, realtime → chat, auth, ai/grammar, ai/botai → store, ai
 1. Token session ไม่เคยอยู่ใน JSON/URL ; DB เก็บแค่ digest
 2. ทุกคำสั่ง WS ตรวจ session ใหม่ + ตรวจ membership ใน service — **identity มาจาก session ไม่ใช่จาก payload**
 3. `Origin` ต้องตรง `ALLOWED_ORIGINS` ทั้ง HTTP mutation และ WS upgrade
-4. ผู้ใช้เห็นเฉพาะห้องของตัวเอง ; กลุ่มเห็น history หลังเข้าร่วมเท่านั้น ; ห้ามเพิ่มคนอื่นเข้ากลุ่ม
+4. ผู้ใช้เห็นเฉพาะห้องของตัวเอง ; กลุ่มเห็น history หลังเข้าร่วมเท่านั้น ; ห้ามเพิ่มคนอื่นเข้ากลุ่ม (ทุกคนต้องกด join เอง)
 5. อย่า log เนื้อหาข้อความ/draft/รหัสผ่าน/connection string
 6. ข้อความ grammar ส่งออกไป Google — แจ้งผู้ใช้ผ่าน tooltip/README
 7. Input ทุกช่องมีขีดจำกัดขนาด (frame 16 KiB, message 2,000 อักษร, response 256 KiB, connection/ผู้ใช้ 10)

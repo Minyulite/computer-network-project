@@ -30,6 +30,7 @@ const MaxSequence int64 = 9007199254740991
 type UserSummary struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
 }
 
 type Room struct {
@@ -44,6 +45,21 @@ type Room struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	BotID           string    `json:"botId,omitempty"`
 	BotName         string    `json:"botName,omitempty"`
+	BotAvatar       string    `json:"botAvatar,omitempty"`
+	// Direct lists both people of a direct room, so the other one can be named
+	// and shown even while offline.
+	Direct []UserSummary `json:"direct,omitempty"`
+	// Last is the newest message the requester may see, for the conversation list.
+	// Only the requester's own room list carries it.
+	Last *LastMessage `json:"last,omitempty"`
+}
+
+// LastMessage is a short preview of a room's newest message.
+type LastMessage struct {
+	SenderID   string    `json:"senderId"`
+	SenderName string    `json:"senderName"`
+	Text       string    `json:"text"`
+	SentAt     time.Time `json:"sentAt"`
 }
 
 type Group struct {
@@ -51,6 +67,8 @@ type Group struct {
 	Name      string    `json:"name"`
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
+	// Preview is the first two members, for the overlapping pictures in a list.
+	Preview []UserSummary `json:"preview"`
 }
 
 type GroupMember struct {

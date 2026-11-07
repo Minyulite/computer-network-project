@@ -3,16 +3,28 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 
 const password = "correct horse battery staple";
-const api = "http://127.0.0.1:18080";
-const origin = "http://127.0.0.1:13000";
+const apiPort = process.env.E2E_API_PORT ?? "18080";
+const webPort = process.env.E2E_WEB_PORT ?? "13000";
+const controlPort = process.env.E2E_CONTROL_PORT ?? "18081";
+const api = `http://127.0.0.1:${apiPort}`;
+const origin = `http://127.0.0.1:${webPort}`;
 
 async function connected(page: Page) { await expect(page.getByTestId("connection")).toHaveText("Connected"); }
-async function signup(page: Page, username: string) {
-  await page.goto("/signup");
-  await page.getByLabel("Username", { exact: true }).fill(username);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
+// The server allows five sign-ups a minute per address, so wait and try again when the suite is quick.
+async function signup(page: Page, username: string, avatarNumber?: number) {
+  for (let attempt = 0; ; attempt++) {
+    await page.goto("/signup");
+    if (avatarNumber) await page.getByLabel(`Avatar ${avatarNumber}`, { exact: true }).check();
+    await page.getByLabel("Username", { exact: true }).fill(username);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByLabel("Confirm password").fill(password);
+    await page.getByRole("button", { name: "Create account", exact: true }).click();
+    const done = page.getByTestId("connection"), limited = page.getByText("Too many attempts");
+    await expect(done.or(limited)).toBeVisible();
+    if (await done.isVisible()) break;
+    if (attempt >= 4) throw new Error("Sign-up is still rate limited");
+    await page.waitForTimeout(15_000);
+  }
   await connected(page);
 }
 async function login(page: Page, username: string) {
@@ -32,9 +44,10 @@ async function direct(page: Page, username: string) {
   await expect(page.getByRole("heading", { name: username, exact: true })).toBeVisible();
 }
 async function command(page: Page, type: string, payload: object) {
-  return page.evaluate(async ({ type, payload }) => {
+  // The function body runs in the browser, so the port is passed in rather than read from Node.
+  return page.evaluate(async ({ type, payload, port }) => {
     return await new Promise<{ type: string; payload: Record<string, unknown> }>((resolve, reject) => {
-      const ws = new WebSocket("ws://127.0.0.1:18080/ws");
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
       const timer = setTimeout(() => { ws.close(); reject(new Error("Command timeout")); }, 10000);
       ws.onmessage = event => {
         const frame = JSON.parse(event.data);
@@ -42,7 +55,7 @@ async function command(page: Page, type: string, payload: object) {
         if (frame.requestId === "e2e") { clearTimeout(timer); ws.close(); resolve(frame); }
       };
     });
-  }, { type, payload });
+  }, { type, payload, port: apiPort });
 }
 
 test("real accounts, private/group routing, multiple sessions, reconnect, retries, restart and expiry", async ({ browser, request }, testInfo) => {
@@ -56,7 +69,8 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
   c.on("websocket", ws => ws.on("framereceived", frame => receivedByC.push(String(frame.payload))));
   try {
     await signup(a, "alice"); await signup(b, "bob"); await signup(c, "carol"); await login(a2, "alice");
-    await expect(a.getByRole("button", { name: "alice (you)", exact: true })).toHaveCount(1);
+    // You are not in your own list: there is no one to open a private chat with.
+    await expect(a.getByRole("button", { name: "Chat with alice", exact: true })).toHaveCount(0);
     await expect(b.getByRole("button", { name: "Chat with alice", exact: true })).toHaveCount(1);
     await direct(a, "bob");
     await send(a, "Private hello <script>alert('text only')</script>");
@@ -70,13 +84,16 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     expect((await command(c, "room.history", { roomId: privateID })).payload.code).toBe("room_unavailable");
     expect((await command(c, "message.send", { roomId: privateID, clientMessageId: randomUUID(), text: "intrusion" })).payload.code).toBe("room_unavailable");
 
-    await a.getByLabel("Create a group", { exact: true }).fill("Network study");
+    await a.getByRole("button", { name: "Groups", exact: true }).click();
+    await a.getByRole("button", { name: "New group", exact: true }).click();
+    await a.getByLabel("Group name", { exact: true }).fill("Network study");
     await a.getByRole("button", { name: "Create group", exact: true }).click();
     await expect(a.getByRole("heading", { name: "Network study", exact: true })).toBeVisible();
     await expect(a.getByLabel("Group members")).toContainText("alice");
     await expect(a.getByLabel("Group members")).not.toContainText("bob");
     await send(a, "Before Bob joined");
-    await b.getByRole("button", { name: "# Network study Open to join", exact: true }).click();
+    await b.getByRole("button", { name: "Groups", exact: true }).click();
+    await b.getByRole("button", { name: "Network study Open to join", exact: true }).click();
     await expect(b.getByLabel("Group members")).toContainText("alice");
     await expect(b.getByRole("log")).toHaveCount(0);
     await b.getByRole("button", { name: "Join group", exact: true }).click();
@@ -85,7 +102,8 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await send(b, "After joining the group");
     await expect(a.getByRole("log")).toContainText("After joining the group");
     await expect(a.getByLabel("Group members")).toContainText("bob");
-    await c.getByRole("button", { name: "# Network study Open to join", exact: true }).click();
+    await c.getByRole("button", { name: "Groups", exact: true }).click();
+    await c.getByRole("button", { name: "Network study Open to join", exact: true }).click();
     await expect(c.getByLabel("Group members")).toContainText("bob");
     await expect(c.getByRole("log")).toHaveCount(0);
     const groups = await command(a, "groups.list", {});
@@ -99,7 +117,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await direct(a, "bob");
     await expect(a.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("");
     await expect(a.getByRole("log")).not.toContainText("After joining the group");
-    await a.getByRole("button", { name: "# Network study Joined", exact: true }).click();
+    await a.getByRole("button", { name: /^Network study/ }).click();
     await expect(a.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("group draft");
     await a.getByRole("textbox", { name: "Message", exact: true }).fill("");
     await a.screenshot({ path: testInfo.outputPath("group-desktop.png"), fullPage: true });
@@ -172,7 +190,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await expect(b.getByRole("button", { name: "Chat with alice", exact: true })).toHaveCount(1);
 
     // Restart actual Go (and optionally the Compose DB) with the same durable schema.
-    const restarted = await request.post("http://127.0.0.1:18081/restart", { headers: { Authorization: `Bearer ${process.env.E2E_CONTROL_KEY}` } });
+    const restarted = await request.post(`http://127.0.0.1:${controlPort}/restart`, { headers: { Authorization: `Bearer ${process.env.E2E_CONTROL_KEY}` } });
     expect(restarted.ok()).toBe(true);
     const restartResult = await restarted.json();
     await testInfo.attach("restart-result", { body: JSON.stringify(restartResult), contentType: "application/json" });
@@ -184,8 +202,8 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
     await login(a, "alice"); // Durable account credentials still work.
 
     // More than one bounded history page, generated through the actual protocol.
-    await b.evaluate(async ({ roomId }) => {
-      const ws = new WebSocket("ws://127.0.0.1:18080/ws");
+    await b.evaluate(async ({ roomId, port }) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
       const waiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
       await new Promise<void>(resolve => {
         ws.onmessage = event => {
@@ -210,7 +228,7 @@ test("real accounts, private/group routing, multiple sessions, reconnect, retrie
           await new Promise(resolve => setTimeout(resolve, 220));
         }
       } finally { ws.close(); }
-    }, { roomId: privateID });
+    }, { roomId: privateID, port: apiPort });
     await a2.reload(); await connected(a2); await direct(a2, "bob");
     await expect(a2.getByRole("log").locator("[data-message-id]")).toHaveCount(50);
     await a2.getByRole("button", { name: "Load earlier messages" }).click();
@@ -333,15 +351,15 @@ test("shop assistant: owner configures it and a customer chats with it privately
   const owner = await ownerContext.newPage(), customer = await customerContext.newPage();
   try {
     await signup(owner, "shopowner"); await signup(customer, "shopper");
-    await owner.getByRole("button", { name: /Manage my assistants/ }).click();
-    await owner.getByRole("button", { name: "New assistant" }).click();
+    await owner.getByRole("button", { name: "Shops", exact: true }).click();
+    await owner.getByRole("button", { name: "New shop bot", exact: true }).click();
     await owner.getByLabel("Name", { exact: true }).fill("Corner Cafe");
     await owner.getByLabel("What is your shop about?").fill("A small coffee shop near the station.");
     await owner.getByRole("button", { name: "Add template" }).click();
     await owner.getByLabel("Question", { exact: true }).fill("What time do you open?");
     await owner.getByLabel("Answer", { exact: true }).fill("10.00");
     await owner.getByRole("button", { name: "Save assistant" }).click();
-    await expect(owner.getByText("Live", { exact: true })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "Edit Corner Cafe" })).toContainText("Live");
 
     // Everyone can find it, without seeing how it is configured.
     await customer.getByRole("button", { name: /Corner Cafe/ }).click();
@@ -351,8 +369,38 @@ test("shop assistant: owner configures it and a customer chats with it privately
     await expect(customer.getByRole("log")).toContainText("temporarily unavailable");
 
     // The owner never sees the customer's conversation.
-    await owner.getByRole("button", { name: "Back to chats" }).click();
     await expect(owner.getByText("What time do you open?", { exact: true })).toHaveCount(0);
     await expect(owner.locator(".room-row.selected")).toHaveCount(0);
   } finally { await ownerContext.close(); await customerContext.close(); }
+});
+
+test("avatar choice, and the one conversation list", async ({ browser }) => {
+  const contexts: BrowserContext[] = [];
+  const open = async () => { const context = await browser.newContext(); contexts.push(context); return context.newPage(); };
+  const suffix = Date.now().toString(36).slice(-5);
+  const [dora, eli] = [`dora${suffix}`, `eli${suffix}`];
+  try {
+    const d = await open(), e = await open();
+    // Dora picks the third picture while signing up; Eli lets the server choose.
+    await signup(d, dora, 3);
+    await expect(d.locator(".rail-account img")).toHaveAttribute("src", /\/avatars\/p03\.svg$/);
+    await signup(e, eli);
+    await expect(e.locator(".rail-account img")).toHaveAttribute("src", /\/avatars\/p(0[1-9]|1[0-2])\.svg$/);
+    // People, groups and shops share one list: someone online has a picture and a green dot.
+    await expect(d.getByRole("button", { name: `Chat with ${eli}`, exact: true }).locator(".presence")).toHaveCount(1);
+
+    // A new group appears in the same list as two overlapping pictures, and anyone can join it.
+    await d.getByRole("button", { name: "Groups", exact: true }).click();
+    await d.getByRole("button", { name: "New group", exact: true }).click();
+    await d.getByLabel("Group name", { exact: true }).fill("Reading club");
+    await d.getByRole("button", { name: "Create group", exact: true }).click();
+    await expect(d.getByRole("heading", { name: "Reading club", exact: true })).toBeVisible();
+    await expect(d.getByRole("button", { name: "Reading club Joined", exact: true }).locator(".group-stack")).toHaveCount(1);
+    await e.getByRole("button", { name: "Groups", exact: true }).click();
+    await e.getByRole("button", { name: "Reading club Open to join", exact: true }).click();
+    await e.getByRole("button", { name: "Join group", exact: true }).click();
+    await expect(e.getByLabel("Group members")).toContainText(dora);
+  } finally {
+    for (const context of contexts) await context.close();
+  }
 });
