@@ -1,0 +1,21 @@
+# Render Blueprint: Go API only. PostgreSQL is on Neon, the frontend on Vercel.
+services:
+  - type: web
+    name: chat-api
+    runtime: docker
+    plan: free
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    numInstances: 1 # The WebSocket hub keeps state in memory; never scale past one instance.
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Neon direct connection string (host without "-pooler"), ending in ?sslmode=require
+      - key: HOST
+        value: 0.0.0.0
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ALLOWED_ORIGINS
+        sync: false # Set in the dashboard, e.g. https://app.example.com
+      - key: GEMINI_API_KEY
+        sync: false # Optional
