@@ -5,6 +5,14 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+// The session cookie is SameSite=Lax, so it is only sent when the API and the
+// website share a site: the same hostname, or sibling subdomains of one domain.
+function sameSite(a: string, b: string) {
+  if (a === b) return true;
+  const parent = (host: string) => host.split(".").slice(1).join(".");
+  return /[A-Za-z]/.test(a) && a.includes(".") && b.includes(".") && parent(a) === parent(b) && parent(a).includes(".");
+}
+
 export function endpoints() {
   const api = new URL(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080");
   const ws = new URL(process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws");
@@ -12,8 +20,8 @@ export function endpoints() {
       api.hostname !== ws.hostname || api.username || api.password || ws.username || ws.password || ws.search) {
     throw new Error("Check the API and WebSocket URLs in the frontend configuration.");
   }
-  if (typeof window !== "undefined" && api.hostname !== window.location.hostname) {
-    throw new Error("The website and API must use the same hostname. Check NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL.");
+  if (typeof window !== "undefined" && !sameSite(api.hostname, window.location.hostname)) {
+    throw new Error("The website and API must be on the same site (same hostname, or subdomains of one domain such as app.example.com and api.example.com). Check NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL.");
   }
   return { api, ws };
 }

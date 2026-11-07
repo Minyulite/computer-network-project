@@ -19,13 +19,16 @@ func Open(ctx context.Context, databaseURL string, maxConns int32) (*DB, error) 
 		return nil, fmt.Errorf("database pool size must be positive")
 	}
 	config.MaxConns = maxConns
+	// Serverless hosts such as Neon suspend idle connections after a few minutes; retire ours first.
+	config.MaxConnIdleTime = 4 * time.Minute
 	config.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create database pool: %w", err)
 	}
 	db := &DB{Pool: pool}
-	if err := db.Ping(ctx); err != nil {
+	// A suspended serverless database can take several seconds to wake, so startup uses the caller's deadline.
+	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("database unavailable")
 	}
