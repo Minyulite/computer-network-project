@@ -116,8 +116,8 @@ input:focus-visible, textarea:focus-visible { outline: 0; border-color: var(--ac
 .reveal { position: absolute; right: 4px; bottom: 4px; width: 32px; height: 32px; padding: 0; border: 0; background: none; color: var(--muted); }
 .reveal:hover:not(:disabled) { background: rgba(28, 35, 32, .05); color: var(--text); }
 .auth-switch { margin-top: 20px; font-size: 14px; color: var(--text-2); }
-.loading-shell { display: grid; gap: 16px; justify-items: start; max-width: 480px; margin: 15vh auto; padding: 32px; }
-.loading-shell h1 { font-family: var(--serif); font-size: 32px; line-height: 1.15; font-weight: 400; }
+.loading-shell { display: grid; gap: 20px; justify-items: center; align-content: center; min-height: 100vh; margin: 0 auto; padding: 32px; text-align: center; background: var(--bg); }
+.loading-shell h1 { font-size: 24px; line-height: 32px; font-weight: 500; letter-spacing: -.01em; }
 
 /* Avatars: round cartoon pictures, shared by the sign-up form and the chat */
 .avatar { position: relative; display: inline-flex; flex-shrink: 0; width: 44px; height: 44px; border-radius: 30%; background: var(--raised); }
@@ -162,7 +162,9 @@ input:focus-visible, textarea:focus-visible { outline: 0; border-color: var(--ac
 .diff-del { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1.5px; }
 .diff-add { color: var(--accent-hover); background: rgba(33, 102, 78, .10); border-radius: 3px; text-decoration: underline; text-decoration-color: rgba(33, 102, 78, .5); text-underline-offset: 3px; }
 .grammar-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.grammar-spinner { flex-shrink: 0; width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+.spinner { display: inline-block; flex-shrink: 0; vertical-align: middle; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+button.primary .spinner { border-color: rgba(255, 255, 255, .35); border-top-color: #fff; }
+.loading-row { display: flex; justify-content: center; padding: 12px 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(4px); } }
 

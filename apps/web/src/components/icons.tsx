@@ -67,6 +67,10 @@ export const BrandMark = ({ size = 24 }: Props) => <svg className="brand-mark" w
   strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false"><path d="M7 17 17 7" /><path d="M8 7h9v9" /></svg>;
 
 /** The product mark: the arrow from the original logo, drawn flat in the accent. */
+export function Spinner({ size = 14, label }: { size?: number; label?: string }) {
+  return <span className="spinner" style={{ width: size, height: size }} role={label ? "status" : undefined} aria-label={label} aria-hidden={label ? undefined : true} />;
+}
+
 export function Brand({ href }: { href?: string }) {
   const content = <><svg className="brand-mark" width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor"
     strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false"><path d="M7 17 17 7" /><path d="M8 7h9v9" /></svg>Commonroom</>;

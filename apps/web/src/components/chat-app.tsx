@@ -7,7 +7,7 @@ import { Avatar, GroupAvatar, PersonAvatar } from "@/components/avatar";
 import { Modal } from "@/components/modal";
 import { BotEditor, maxBots } from "@/components/bot-manager";
 import { GrammarTextarea } from "@/components/grammar-textarea";
-import { Brand, BrandMark, ChatIcon, LanguagesIcon, LogOutIcon, PlusIcon, SearchIcon, SendIcon, StoreIcon, UserIcon, UserPlusIcon, UsersIcon } from "@/components/icons";
+import { Brand, BrandMark, Spinner, ChatIcon, LanguagesIcon, LogOutIcon, PlusIcon, SearchIcon, SendIcon, StoreIcon, UserIcon, UserPlusIcon, UsersIcon } from "@/components/icons";
 import { ApiError, authRequest, errorText, type Session, type User } from "@/lib/api";
 import { botAvatar, personAvatar } from "@/lib/avatars";
 import { ChatStore } from "@/lib/chat/store";
@@ -30,7 +30,7 @@ export function ChatApp() {
   }, [router, attempt]);
   if (session) return <ChatWorkspace key={session.user.id} user={session.user} />;
   return <main className="loading-shell"><Brand />
-    {error ? <><p role="alert">{error}</p><button onClick={() => { setError(""); setAttempt(attempt + 1); }}>Try again</button></> : <p className="muted" role="status">Opening your conversations…</p>}</main>;
+    {error ? <><p role="alert">{error}</p><button onClick={() => { setError(""); setAttempt(attempt + 1); }}>Try again</button></> : <Spinner size={28} label="Opening your conversations" />}</main>;
 }
 
 function otherUserID(room: Room, user: User) {
@@ -114,7 +114,7 @@ function GroupDialog({ uncertain, onSubmit, onRefresh, onClose }: DialogProps) {
         <button type="button" disabled={busy} onClick={() => void run(onRefresh)}>Refresh group list</button></div>}
       <div className="dialog-actions">
         <button type="button" onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={busy || !!uncertain}>{busy ? "Please wait…" : "Create group"}</button>
+        <button className="primary" disabled={busy || !!uncertain}>{busy ? <Spinner label="Please wait" /> : "Create group"}</button>
       </div>
     </form>
   </Modal>;
@@ -306,13 +306,13 @@ function ChatWorkspace({ user }: { user: User }) {
           <p className="welcome-online"><i className={othersOnline ? "presence" : "presence offline"} />{othersOnline ? `${othersOnline} ${othersOnline === 1 ? "person" : "people"} online now` : "No one else is online yet"}</p></div> :
           <>
             {group && <div className="members" aria-label="Group members"><strong>Members</strong>
-              {state.members[group.id] ? state.members[group.id].map(member => <span key={member.user.id}>{online.has(member.user.id) && <i className="presence" />}{member.user.username}</span>) : <span>Loading members…</span>}
+              {state.members[group.id] ? state.members[group.id].map(member => <span key={member.user.id}>{online.has(member.user.id) && <i className="presence" />}{member.user.username}</span>) : <Spinner label="Loading members" />}
               <button className="text-button" disabled={!connected} onClick={() => void store.loadMembers(group.id)}>Refresh members</button></div>}
             {!room ? <div className="welcome"><h2>Join {group?.name ?? "this group"}</h2><p>Members can send messages and read everything posted after they join.</p>
               <button className="primary large" disabled={!connected || busy} onClick={() => void action(() => store.joinGroup(state.selected!))}>Join group</button></div> : <>
               <div className="message-list" role="log" aria-label={`Messages in ${selectedTitle}`} aria-live="polite">
                 {feed?.more && <button className="history-button" disabled={!connected || feed.loading} onClick={() => void store.loadHistory(room.id, true)}>Load earlier messages</button>}
-                {feed?.loading && <p className="center muted" role="status">Loading messages…</p>}
+                {feed?.loading && <p className="center loading-row"><Spinner label="Loading messages" /></p>}
                 {feed?.error && <p className="error" role="alert">{feed.error} <button disabled={!connected} onClick={() => void store.loadHistory(room.id)}>Retry history</button></p>}
                 {feed?.loaded && !feed.messages.length && <div className="empty-conversation"><p>No messages yet</p><span>{group ? "You will see messages posted after you joined" : "Send the first message"}</span></div>}
                 {feed?.messages.map((message, index) => {
@@ -333,10 +333,10 @@ function ChatWorkspace({ user }: { user: User }) {
                   </article>;
                 })}
                 {pending.map(item => <article className="message own pending" key={item.clientMessageId}><div className="bubble"><p>{item.text}</p>
-                  <small>{item.state === "sending" ? "Saving…" : "Not confirmed"}</small>
+                  <small>{item.state === "sending" ? <Spinner label="Sending" /> : "Not confirmed"}</small>
                   {item.state === "uncertain" && <><p className="small">{item.error}</p><button disabled={!connected} onClick={() => void store.send(item.roomId, item.text, item.clientMessageId)}>Retry message</button></>}</div></article>)}
                 {room.kind === "bot" && (feed?.messages.at(-1)?.sender.id === user.id || pending.some(item => item.state === "sending")) &&
-                  <p className="typing" role="status">{room.botName ?? "The assistant"} is typing…</p>}
+                  <p className="typing" role="status"><Spinner />{room.botName ?? "The assistant"} is typing</p>}
                 <div ref={end} />
               </div>
               <form className="composer" onSubmit={send}>
