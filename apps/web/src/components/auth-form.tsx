@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { AvatarPicker } from "@/components/avatar";
-import { Brand, EyeIcon, EyeOffIcon } from "@/components/icons";
+import { Brand, Spinner, EyeIcon, EyeOffIcon } from "@/components/icons";
 import { authRequest, errorText } from "@/lib/api";
 import { personAvatars } from "@/lib/avatars";
 
@@ -66,7 +66,7 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
           help={signup ? "At least 8 characters" : undefined} />
         {signup && <PasswordField label="Confirm password" name="confirm" autoComplete="new-password" />}
         {error && <p role="alert" className="error">{error}</p>}
-        <button className="primary large" disabled={busy}>{busy ? (signup ? "Creating account…" : "Signing in…") : signup ? "Create account" : "Sign in"}</button>
+        <button className="primary large" disabled={busy}>{busy ? <Spinner size={18} label={signup ? "Creating account" : "Signing in"} /> : signup ? "Create account" : "Sign in"}</button>
       </form>
       <p className="auth-switch">{signup ? "Already have an account?" : "New here?"} <Link href={signup ? "/signin" : "/signup"}>{signup ? "Sign in" : "Create an account"}</Link></p>
     </section>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { CheckIcon, SpellCheckIcon } from "@/components/icons";
+import { CheckIcon, SpellCheckIcon, Spinner } from "@/components/icons";
 import { errorText } from "@/lib/api";
 import { wordDiff } from "@/lib/word-diff";
 
@@ -146,7 +146,7 @@ export function GrammarTextarea({ id, value, onChange, correct, canCorrect, onCo
       {panel.kind === "menu" && <button type="button" className="grammar-item" disabled={!canCorrect}
         title={canCorrect ? "Sends the selection and nearby draft text to Google Gemini" : "Connection unavailable"}
         onClick={() => void runCorrection(panel)}><SpellCheckIcon />Correct grammar</button>}
-      {panel.kind === "loading" && <div className="grammar-status" role="status"><span className="grammar-spinner" aria-hidden />Checking grammar with Gemini…</div>}
+      {panel.kind === "loading" && <div className="grammar-status" role="status"><Spinner />Checking grammar with Gemini…</div>}
       {panel.kind === "nochange" && <div className="grammar-status ok" role="status"><CheckIcon />No issues found</div>}
       {panel.kind === "error" && <>
         <div className="grammar-status error" role="alert">{panel.message}</div>

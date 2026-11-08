@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Modal } from "@/components/modal";
 import { AvatarPicker } from "@/components/avatar";
-import { PlusIcon } from "@/components/icons";
+import { PlusIcon, Spinner } from "@/components/icons";
 import { errorText } from "@/lib/api";
 import { botAvatar, botAvatars, randomOf } from "@/lib/avatars";
 import type { ChatStore } from "@/lib/chat/store";
@@ -56,7 +56,7 @@ export function BotEditor({ store, botId, connected, onClose }: Props) {
   return <Modal wide title={botId === "new" ? "New shop bot" : "Edit shop bot"} onClose={() => { if (!busy) onClose(); }}>
     <p className="bot-note">Customers chat with your assistant privately; you do not see their conversations. Their messages and your description are sent to Google Gemini to write answers. Replies to template questions are your own words, unchanged.</p>
     {error && <p className="error" role="alert">{error}</p>}
-    {loading ? <p className="muted">Loading…</p> :
+    {loading ? <p className="loading-row"><Spinner label="Loading" /></p> :
     <form className="bot-form" onSubmit={save}>
       <AvatarPicker ids={botAvatars} name="bot-avatar" label="Avatar" value={form.avatar ?? botAvatars[0]} onChange={avatar => setForm({ ...form, avatar })} />
       <label>Name<input value={form.name} maxLength={limits.name} required onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Corner Café" /></label>
@@ -78,7 +78,7 @@ export function BotEditor({ store, botId, connected, onClose }: Props) {
 
       {botId !== "new" && <label className="bot-toggle"><input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} /> Live, so customers can find and chat with it</label>}
       <div className="bot-actions">
-        <button className="primary" disabled={!connected || busy}>{busy ? "Saving…" : "Save assistant"}</button>
+        <button className="primary" disabled={!connected || busy}>{busy ? <Spinner label="Saving" /> : "Save assistant"}</button>
         <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
       </div>
     </form>}

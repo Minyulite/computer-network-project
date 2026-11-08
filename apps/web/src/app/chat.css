@@ -123,7 +123,7 @@
 .empty-conversation { display: grid; gap: 4px; margin: auto; text-align: center; color: var(--muted); }
 .empty-conversation p { font-size: 15px; font-weight: 500; color: var(--text); }
 .history-button { align-self: center; }
-.typing { margin: 0 4px; font-size: 12px; color: var(--muted); }
+.typing { display: flex; align-items: center; gap: 8px; margin: 0 4px; font-size: 12px; color: var(--muted); }
 
 /* Composer: the box is all there is under the messages */
 .composer { margin: 0 28px 20px; }
