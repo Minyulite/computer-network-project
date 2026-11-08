@@ -17,8 +17,8 @@ import (
 
 const (
 	defaultBaseURL  = "https://generativelanguage.googleapis.com/v1beta"
-	defaultTimeout  = 30 * time.Second
-	attemptTimeout  = 12 * time.Second // Flaky networks often stall the TLS handshake.
+	defaultTimeout  = 45 * time.Second
+	attemptTimeout  = 20 * time.Second // Flaky networks often stall the TLS handshake.
 	maxAttempts     = 3
 	retryDelay      = 500 * time.Millisecond
 	maxResponseSize = 1 << 20
@@ -44,7 +44,7 @@ type Request struct {
 	Prompt     string
 	JSONSchema map[string]any
 	MaxTokens  int
-	// Timeout caps all attempts together; zero means the default of 30 seconds.
+	// Timeout caps all attempts together; zero means the default of 45 seconds.
 	Timeout time.Duration
 }
 

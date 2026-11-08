@@ -1,6 +1,15 @@
 package realtime
 
-import "example.com/computer-network/project/apps/api/internal/chat"
+import (
+	"context"
+	"time"
+
+	"example.com/computer-network/project/apps/api/internal/chat"
+)
+
+// botWriteTimeout replaces the short command deadline for bot saves, so a slow
+// database cannot fail a save that is still going to commit.
+const botWriteTimeout = 15 * time.Second
 
 type botIDRequest struct {
 	BotID string `json:"botId"`
@@ -34,12 +43,16 @@ func (h *Hub) botGet(r request, p botIDRequest) (any, error) {
 }
 
 func (h *Hub) botCreate(r request, p botCreateRequest) (any, error) {
-	detail, err := h.chat.CreateBot(r.ctx, r.identity, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: true, Templates: p.Templates})
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.ctx), botWriteTimeout)
+	defer cancel()
+	detail, err := h.chat.CreateBot(ctx, r.identity, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: true, Templates: p.Templates})
 	return h.botSaved(r, detail, err)
 }
 
 func (h *Hub) botUpdate(r request, p botUpdateRequest) (any, error) {
-	detail, err := h.chat.UpdateBot(r.ctx, r.identity, p.BotID, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: p.Enabled, Templates: p.Templates})
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.ctx), botWriteTimeout)
+	defer cancel()
+	detail, err := h.chat.UpdateBot(ctx, r.identity, p.BotID, chat.BotInput{Name: p.Name, Avatar: p.Avatar, Description: p.Description, Enabled: p.Enabled, Templates: p.Templates})
 	return h.botSaved(r, detail, err)
 }
 

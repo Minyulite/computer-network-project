@@ -10,7 +10,7 @@ import (
 )
 
 const maxBotInflight = 3 // Per user, shared across that user's devices.
-const botReplyTimeout = 60 * time.Second
+const botReplyTimeout = 100 * time.Second
 
 // BotReplier answers a customer's message in a bot room and stores the reply.
 // When busy is true it must reply without calling any AI service.

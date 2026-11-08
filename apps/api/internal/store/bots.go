@@ -11,6 +11,9 @@ import (
 // MaxBotsPerOwner bounds how many bots one account can create.
 const MaxBotsPerOwner = 5
 
+// botWriteTimeout covers a whole multi-statement bot write, which is slower than a single query on a remote database.
+const botWriteTimeout = 15 * time.Second
+
 var ErrBotLimit = errors.New("bot limit reached")
 
 type BotRecord struct {
@@ -55,7 +58,7 @@ func insertTemplates(ctx context.Context, tx pgx.Tx, botID string, templates []B
 // CreateBot inserts the bot, its system user and its templates atomically.
 // The owner row is locked so concurrent creates cannot exceed the limit.
 func (db *DB) CreateBot(parent context.Context, bot BotRecord, templates []BotTemplateRecord) (BotRecord, error) {
-	ctx, cancel := operationContext(parent)
+	ctx, cancel := context.WithTimeout(parent, botWriteTimeout)
 	defer cancel()
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -101,7 +104,7 @@ func (db *DB) CreateBot(parent context.Context, bot BotRecord, templates []BotTe
 // UpdateBot replaces the bot's settings and its whole template set. Only the
 // owner can update; anyone else sees ErrNotFound.
 func (db *DB) UpdateBot(parent context.Context, ownerID string, bot BotRecord, templates []BotTemplateRecord) (BotRecord, error) {
-	ctx, cancel := operationContext(parent)
+	ctx, cancel := context.WithTimeout(parent, botWriteTimeout)
 	defer cancel()
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
