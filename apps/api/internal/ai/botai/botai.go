@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"example.com/computer-network/project/apps/api/internal/ai/llm"
@@ -103,6 +104,7 @@ func (s *Service) Reply(ctx context.Context, roomID, customerMessageID, text str
 		case errors.Is(err, context.Canceled):
 			return chat.SendResult{}, err
 		default:
+			log.Printf("botai: answer failed for room %s: %v", roomID, err)
 			reply = UnavailableReply
 		}
 	}
@@ -133,7 +135,7 @@ func (s *Service) Answer(ctx context.Context, bc chat.BotContext, text string) (
 	case DecisionOutOfScope:
 		return OutOfScopeReply, decision, nil
 	}
-	answer, err := s.llm.Generate(ctx, llm.Request{System: answerPrompt, MaxTokens: 1024,
+	answer, err := s.llm.Generate(ctx, llm.Request{System: answerPrompt, MaxTokens: 2048,
 		Prompt: "<shop_description>\n" + cleanData(bc.Name, 64) + "\n" + cleanData(bc.Description, 2000) + "\n</shop_description>\n" +
 			conversation(history) + "<customer_message>\n" + cleanData(text, 2000) + "\n</customer_message>"})
 	if err != nil {
@@ -168,7 +170,7 @@ func (s *Service) classify(ctx context.Context, bc chat.BotContext, history []ch
 		fmt.Fprintf(&b, "t%d: %s\n", i+1, cleanData(t.Question, 300))
 	}
 	b.WriteString("</templates>\n" + conversation(history) + "<customer_message>\n" + cleanData(text, 2000) + "\n</customer_message>")
-	raw, err := s.llm.Generate(ctx, llm.Request{System: classifyPrompt, Prompt: b.String(), JSONSchema: classifySchema, MaxTokens: 256})
+	raw, err := s.llm.Generate(ctx, llm.Request{System: classifyPrompt, Prompt: b.String(), JSONSchema: classifySchema, MaxTokens: 1024})
 	if err != nil {
 		return "", chat.BotTemplate{}, err
 	}
